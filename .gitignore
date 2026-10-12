@@ -65,3 +65,6 @@ test-framework/results/
 
 #Docker stuff
 docker/.buildx_config.toml
+
+CLAUDE.md
+
