@@ -68,3 +68,4 @@ docker/.buildx_config.toml
 
 CLAUDE.md
 
+.claude/
