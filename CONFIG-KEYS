@@ -961,6 +961,12 @@ DESC:		If set, every message carries an 'event_source' field with this value, ie
 		'pmacct', to tell apart its data from that of other sources sharing a topic.
 DEFAULT:	none
 
+KEY:		http_event_type
+DESC:		If set, data messages carry this value in their 'event_type' field instead of
+		'purge', ie. 'pmacct_flow', to follow the naming of other sources sharing a topic.
+		Purge markers (http_markers) keep 'purge_init' and 'purge_close'.
+DEFAULT:	none
+
 KEY:		http_label_flatten
 VALUES:		[ true | false ]
 DESC:		With 'label' in the aggregation method and pre_tag_label_encode_as_map set to

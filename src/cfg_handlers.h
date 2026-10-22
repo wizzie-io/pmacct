@@ -135,6 +135,7 @@ extern int cfg_key_http_timeout(char *, char *, char *);
 extern int cfg_key_http_retries(char *, char *, char *);
 extern int cfg_key_http_timestamp_field(char *, char *, char *);
 extern int cfg_key_http_event_source(char *, char *, char *);
+extern int cfg_key_http_event_type(char *, char *, char *);
 extern int cfg_key_http_label_flatten(char *, char *, char *);
 extern int cfg_key_plugin_pipe_size(char *, char *, char *);
 extern int cfg_key_plugin_buffer_size(char *, char *, char *);

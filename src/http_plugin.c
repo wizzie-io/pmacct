@@ -549,6 +549,11 @@ void http_cache_purge(struct chained_cache *queue[], int index, int safe_action)
       json_object_set_new_nocheck(json_obj, "event_source", json_string(config.http_event_source));
     }
 
+    /* replaces "purge"; purge_init / purge_close markers keep theirs */
+    if (config.http_event_type) {
+      json_object_set_new_nocheck(json_obj, "event_type", json_string(config.http_event_type));
+    }
+
     /* "label": {"k1": "v1", ..} becomes "k1": "v1", ..; keys never override
        fields already there */
     if (config.http_label_flatten) {
