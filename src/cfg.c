@@ -227,6 +227,7 @@ static const struct _dictionary_line dictionary[] = {
   {"http_timestamp_field", cfg_key_http_timestamp_field},
   {"http_event_source", cfg_key_http_event_source},
   {"http_event_type", cfg_key_http_event_type},
+  {"http_override_prefix", cfg_key_http_override_prefix},
   {"http_label_flatten", cfg_key_http_label_flatten},
   {"http_cache_entries", cfg_key_print_cache_entries},
   {"http_max_writers", cfg_key_dump_max_writers},

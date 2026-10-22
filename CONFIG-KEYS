@@ -964,7 +964,16 @@ DEFAULT:	none
 KEY:		http_event_type
 DESC:		If set, data messages carry this value in their 'event_type' field instead of
 		'purge', ie. 'pmacct_flow', to follow the naming of other sources sharing a topic.
-		Purge markers (http_markers) keep 'purge_init' and 'purge_close'.
+		Purge markers (http_markers) keep 'purge_init' and 'purge_close'. See also
+		http_override_prefix to keep the original value.
+DEFAULT:	none
+
+KEY:		http_override_prefix
+DESC:		When the plugin replaces a field pmacct already put in a message (currently
+		'event_type', via http_event_type), the original value is kept in a field named
+		after this prefix plus the original name, ie. with 'pmacct_' the message carries
+		"event_type": "pmacct_flow", "pmacct_event_type": "purge". If not set, the
+		original value is dropped.
 DEFAULT:	none
 
 KEY:		http_label_flatten

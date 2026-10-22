@@ -441,6 +441,22 @@ static int p_http_produce(CURL *curl, char *url, struct p_http_batch *batch, cha
   return SUCCESS;
 }
 
+/* Sets 'key' to 'value' (reference stolen). If the key was already there and
+   http_override_prefix is set, its original value is kept as <prefix><key>. */
+static void p_http_override(json_t *obj, const char *key, json_t *value)
+{
+  json_t *orig = json_object_get(obj, key);
+
+  if (orig && config.http_override_prefix) {
+    char kept[SRVBUFLEN];
+
+    snprintf(kept, sizeof(kept), "%s%s", config.http_override_prefix, key);
+    json_object_set(obj, kept, orig);
+  }
+
+  json_object_set_new(obj, key, value);
+}
+
 void http_cache_purge(struct chained_cache *queue[], int index, int safe_action)
 {
   char url[LARGEBUFLEN], hdrbuf[LARGEBUFLEN], *topic_esc = NULL;
@@ -551,7 +567,7 @@ void http_cache_purge(struct chained_cache *queue[], int index, int safe_action)
 
     /* replaces "purge"; purge_init / purge_close markers keep theirs */
     if (config.http_event_type) {
-      json_object_set_new_nocheck(json_obj, "event_type", json_string(config.http_event_type));
+      p_http_override(json_obj, "event_type", json_string(config.http_event_type));
     }
 
     /* "label": {"k1": "v1", ..} becomes "k1": "v1", ..; keys never override

@@ -208,13 +208,15 @@ def case_timestamp_history(binary, workdir):
         run_flows(binary, workdir, ep, 3, "http_apikey[t]: %s" % APIKEY,
                   "http_history[t]: 1m", "http_history_roundoff[t]: m", "timestamps_since_epoch: true",
                   "http_timestamp_field[t]: timestamp", "http_event_source[t]: pmacct",
-                  "http_event_type[t]: pmacct_flow", "http_markers[t]: true")
+                  "http_event_type[t]: pmacct_flow", "http_override_prefix[t]: pmacct_",
+                  "http_markers[t]: true")
         events = [m.get("event_type") for m in ep.messages()]
         check("purge_init" in events and "purge_close" in events, "markers keep their event_type")
         msgs = [m for m in ep.messages() if m.get("event_type") not in ("purge_init", "purge_close")]
         check(len(msgs) == 3, "3 messages received, got %d" % len(msgs))
         for m in msgs:
             check(m.get("event_type") == "pmacct_flow", "event_type pmacct_flow")
+            check(m.get("pmacct_event_type") == "purge", "original event_type kept as pmacct_event_type")
             check(isinstance(m.get("timestamp"), int), "timestamp is an integer")
             check(m["timestamp"] == int(m["stamp_inserted"]), "timestamp equals stamp_inserted")
             check(m["timestamp"] % 60 == 0, "timestamp aligned to the minute")
@@ -228,11 +230,14 @@ def case_timestamp_no_history(binary, workdir):
     ep = Endpoint(200)
     try:
         start = int(time.time())
-        run_flows(binary, workdir, ep, 2, "http_apikey[t]: %s" % APIKEY, "http_timestamp_field[t]: ts")
+        run_flows(binary, workdir, ep, 2, "http_apikey[t]: %s" % APIKEY, "http_timestamp_field[t]: ts",
+                  "http_event_type[t]: pmacct_flow")
         msgs = ep.messages()
         check(msgs, "something was received")
         for m in msgs:
             check("stamp_inserted" not in m, "no stamp_inserted without http_history")
+            check(m.get("event_type") == "pmacct_flow" and not any(k.endswith("_event_type") for k in m),
+                  "without http_override_prefix the original event_type is dropped")
             check(isinstance(m.get("ts"), int) and start <= m["ts"] <= time.time(), "ts is the purge time")
     finally:
         ep.stop()

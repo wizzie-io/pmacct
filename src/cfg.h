@@ -193,6 +193,7 @@ struct configuration {
   char *http_timestamp_field;
   char *http_event_source;
   char *http_event_type;
+  char *http_override_prefix;
   int http_label_flatten;
   char *kafka_writer_id;
   int print_cache_entries;
