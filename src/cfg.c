@@ -214,6 +214,28 @@ static const struct _dictionary_line dictionary[] = {
   {"kafka_config_file", cfg_key_kafka_config_file},
   {"kafka_trigger_exec", cfg_key_sql_trigger_exec},
   {"kafka_trigger_exec_async", cfg_key_sql_trigger_exec_async},
+  {"http_refresh_time", cfg_key_sql_refresh_time},
+  {"http_history", cfg_key_sql_history},
+  {"http_history_offset", cfg_key_sql_history_offset},
+  {"http_history_roundoff", cfg_key_sql_history_roundoff},
+  {"http_endpoint", cfg_key_http_endpoint},
+  {"http_topic", cfg_key_sql_table},
+  {"http_apikey", cfg_key_http_apikey},
+  {"http_apikey_header", cfg_key_http_apikey_header},
+  {"http_timeout", cfg_key_http_timeout},
+  {"http_retries", cfg_key_http_retries},
+  {"http_timestamp_field", cfg_key_http_timestamp_field},
+  {"http_event_source", cfg_key_http_event_source},
+  {"http_cache_entries", cfg_key_print_cache_entries},
+  {"http_max_writers", cfg_key_dump_max_writers},
+  {"http_preprocess", cfg_key_sql_preprocess},
+  {"http_preprocess_type", cfg_key_sql_preprocess_type},
+  {"http_startup_delay", cfg_key_sql_startup_delay},
+  {"http_multi_values", cfg_key_sql_multi_values},
+  {"http_num_protos", cfg_key_num_protos},
+  {"http_markers", cfg_key_print_markers},
+  {"http_trigger_exec", cfg_key_sql_trigger_exec},
+  {"http_trigger_exec_async", cfg_key_sql_trigger_exec_async},
   {"nfacctd_proc_name", cfg_key_proc_name},
   {"nfacctd_port", cfg_key_nfacctd_port},
   {"nfacctd_ip", cfg_key_nfacctd_ip},
@@ -672,6 +694,9 @@ static struct plugin_type_entry plugin_types_list[] = {
 #endif
 #ifdef WITH_KAFKA
   {PLUGIN_ID_KAFKA,     "kafka",        kafka_plugin},
+#endif
+#ifdef WITH_HTTP
+  {PLUGIN_ID_HTTP,      "http",         http_plugin},
 #endif
   {PLUGIN_ID_TEE,       "tee",          tee_plugin},
   {PLUGIN_ID_UNKNOWN,   "",             NULL},

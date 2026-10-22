@@ -34,6 +34,7 @@
 #define PLUGIN_ID_TEE		8
 #define PLUGIN_ID_AMQP		9
 #define PLUGIN_ID_KAFKA		10
+#define PLUGIN_ID_HTTP		11
 #define PLUGIN_ID_UNKNOWN	255 
 
 /* vars */

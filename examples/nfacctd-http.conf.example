@@ -1,0 +1,35 @@
+!
+! nfacctd configuration example
+!
+! Publishes aggregated flows over HTTP to an ingest service, ie. a Kong gateway
+! in front of n2kafka (http2k decoder). Requires --enable-http --enable-jansson.
+!
+! Did you know CONFIG-KEYS contains the detailed list of all configuration keys
+! supported by 'nfacctd' and 'pmacctd' ?
+!
+! debug: true
+daemonize: true
+pidfile: /var/run/nfacctd.pid
+syslog: daemon
+!
+nfacctd_port: 2100
+!
+plugins: http[foo]
+aggregate[foo]: src_host, dst_host, src_port, dst_port, proto, tos
+!
+! Data is POSTed to http://kong:8000/v1/data/flows with the header 'apikey: <key>'
+http_endpoint[foo]: http://kong:8000
+http_topic[foo]: flows
+http_apikey[foo]: changeme
+! http_apikey_header[foo]: apikey
+!
+http_refresh_time[foo]: 60
+http_history[foo]: 1m
+http_history_roundoff[foo]: m
+!
+! Adds "timestamp": <start of the time bin, epoch secs> and "event_source": "pmacct"
+http_timestamp_field[foo]: timestamp
+http_event_source[foo]: pmacct
+! http_multi_values[foo]: 131072
+! http_timeout[foo]: 10
+! http_retries[foo]: 3

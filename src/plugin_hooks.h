@@ -176,4 +176,8 @@ extern void amqp_plugin(int, struct configuration *, void *);
 #ifdef WITH_KAFKA
 extern void kafka_plugin(int, struct configuration *, void *);
 #endif
+
+#ifdef WITH_HTTP
+extern void http_plugin(int, struct configuration *, void *);
+#endif
 #endif //PLUGIN_HOOKS_H

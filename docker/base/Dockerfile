@@ -65,7 +65,8 @@ RUN export AVRO_LIBS="-L/usr/local/avro/lib -lavro" && \
                               --enable-ndpi --enable-zmq        \
                               --enable-avro --enable-serdes     \
                               --enable-redis --enable-gnutls    \
-                              --enable-unyte-udp-notif &&       \
+                              --enable-unyte-udp-notif          \
+                              --enable-http &&                  \
   make install
 
 FROM debian:trixie-slim AS base

@@ -185,6 +185,13 @@ struct configuration {
   int kafka_avro_schema_refresh_time;
   char *kafka_avro_schema_registry;
   char *kafka_config_file;
+  char *http_endpoint;
+  char *http_apikey;
+  char *http_apikey_header;
+  int http_timeout;
+  int http_retries;
+  char *http_timestamp_field;
+  char *http_event_source;
   char *kafka_writer_id;
   int print_cache_entries;
   int print_markers;

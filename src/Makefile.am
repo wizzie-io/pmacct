@@ -121,6 +121,11 @@ libdaemons_la_SOURCES += kafka_common.c kafka_plugin.c
 libdaemons_la_LIBADD  += @KAFKA_LIBS@
 libdaemons_la_CFLAGS  += @KAFKA_CFLAGS@
 endif
+if WITH_HTTP
+libdaemons_la_SOURCES += http_plugin.c
+libdaemons_la_LIBADD  += @HTTP_LIBS@
+libdaemons_la_CFLAGS  += @HTTP_CFLAGS@
+endif
 if USING_SQL
 libdaemons_la_SOURCES += sql_common.c sql_handlers.c sql_common_m.c
 libdaemons_la_CFLAGS += -Wno-error=pointer-sign

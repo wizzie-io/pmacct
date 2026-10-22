@@ -279,7 +279,7 @@ DESC:		Specifies the maximum number of bytes to capture for each packet. This di
 DEFAULT:	128 bytes
 
 KEY:		plugins (-P) [GLOBAL]
-VALUES:		[ memory | print | mysql | pgsql | sqlite3 | nfprobe | sfprobe | tee | amqp | kafka ]
+VALUES:		[ memory | print | mysql | pgsql | sqlite3 | nfprobe | sfprobe | tee | amqp | kafka | http ]
 DESC:		Plugins to be enabled. memory, print, nfprobe, sfprobe and tee plugins are always
 		compiled in pmacct executables as they do not have external dependencies. Database
 		(ie. RDBMS, noSQL) and messaging ones (ie. amqp, kafka) do have external dependencies
@@ -907,6 +907,60 @@ DESC:           Defines the Kafka broker topic partition key. A string of printa
 				the aggregation method then this will be set to a null value).
 DEFAULT:	none
 
+KEY:		http_endpoint
+DESC:		Base URL of the HTTP ingest service the 'http' plugin publishes to, ie. a Kong
+		gateway in front of a n2kafka (http2k decoder) instance: "http://kong:8000" or
+		"https://ingest.example.com". Data is sent with POST requests to the URL
+		"<http_endpoint>/v1/data/<http_topic>"; trailing slashes are ignored. Output is
+		always JSON: the objects of a batch are concatenated back-to-back in the request
+		body (see http_multi_values) and the Content-Type is "application/json". This
+		directive is mandatory for the plugin.
+DEFAULT:	none
+
+KEY:		http_topic
+DESC:		Name of the topic data is published to; it becomes the last element of the path
+		of the URL, see http_endpoint. With a Kong + n2kafka setup the actual Kafka topic
+		is this name prefixed on the server side by the identity of the consumer the API
+		key belongs to. Dynamic names, ie. variables, are not supported.
+DEFAULT:	'pmacct.acct'
+
+KEY:		http_apikey
+DESC:		API key sent along with every request to authenticate against the endpoint, ie.
+		the key of a Kong consumer (key-auth plugin). This directive is mandatory for
+		the plugin. The value is never written to logs.
+DEFAULT:	none
+
+KEY:		http_apikey_header
+DESC:		Name of the HTTP header carrying the value of http_apikey.
+DEFAULT:	'apikey'
+
+KEY:		http_timeout
+DESC:		Maximum time, in seconds, a single HTTP request is allowed to take, connection
+		phase included.
+DEFAULT:	10
+
+KEY:		http_retries
+DESC:		Number of attempts made to deliver a batch. Transport errors, 5xx, 408 and 429
+		responses are retried with an increasing pause in between attempts; any other
+		4xx response, ie. a rejected API key, is not. When a batch can't be delivered
+		it is dropped along with what is left of the cache being purged, and an error
+		is logged: data is not carried over to the next purge.
+DEFAULT:	3
+
+KEY:		http_timestamp_field
+DESC:		If set, every message carries a field with this name holding the time of the
+		aggregate as an integer number of seconds since the epoch: the start of its time
+		bin when http_history is in use (the same instant stamp_inserted reports, and so
+		subject to http_history_roundoff), otherwise the time the cache purge starts. It
+		is meant as the event time for indexers that expect it under a fixed name, ie.
+		'timestamp'.
+DEFAULT:	none
+
+KEY:		http_event_source
+DESC:		If set, every message carries an 'event_source' field with this value, ie.
+		'pmacct', to tell apart its data from that of other sources sharing a topic.
+DEFAULT:	none
+
 KEY:            [ bgp_daemon_msglog_kafka_broker_host | bgp_table_dump_kafka_broker_host |
                   bmp_daemon_msglog_kafka_broker_host | bmp_dump_kafka_broker_host |
 		  sfacctd_counter_kafka_broker_host | telemetry_daemon_msglog_kafka_broker_host |
@@ -1337,7 +1391,8 @@ DESC:		Defines the password to use when connecting to the server. Note that sinc
 		that performs password authentication with an empy password. 
 DEFAULT:	'arealsmartpwd'
 
-KEY:		[ sql_refresh_time | print_refresh_time | amqp_refresh_time | kafka_refresh_time ] (-r)
+KEY:		[ sql_refresh_time | print_refresh_time | amqp_refresh_time | kafka_refresh_time |
+		  http_refresh_time ] (-r)
 DESC:		Time interval, in seconds, between consecutive executions of the plugin cache scanner. The
 		scanner purges data into the plugin backend. Note: internally all these config directives
 		write to the same variable; when using multiple plugins it is recommended to bind refresh
@@ -1349,7 +1404,8 @@ DESC:		Time interval, in seconds, between consecutive executions of the plugin c
 		As doing otherwise can originate unexpected behaviours.
 DEFAULT:	60
 
-KEY:		[ sql_startup_delay | print_startup_delay | amqp_startup_delay | kafka_startup_delay ]
+KEY:		[ sql_startup_delay | print_startup_delay | amqp_startup_delay | kafka_startup_delay |
+		  http_startup_delay ]
 DESC:		Defines the time, in seconds, the first cache scan event has to be delayed. This delay
 		is, in turn, propagated to the subsequent scans. It comes useful in two scenarios: a) so 
 		that multiple plugins can use the same refresh time (ie. sql_refresh_time) value, allowing
@@ -1370,7 +1426,7 @@ DESC:		Enables the optimization of the statements sent to the RDBMS essentially 
 		the 'sql_table_version' directive.
 DEFAULT:	false
 
-KEY:		[ sql_history | print_history | amqp_history | kafka_history ]
+KEY:		[ sql_history | print_history | amqp_history | kafka_history | http_history ]
 VALUES:		#[s|m|h|d|w|M]
 DESC:		Enables historical accounting by placing accounted data into configurable time-bins. It
 		does use the 'stamp_inserted' (base time of the time-bin) and 'stamp_updated' (last time
@@ -1383,7 +1439,8 @@ DESC:		Enables historical accounting by placing accounted data into configurable
 		or '4h' - four hours, '86400s' or '1d' - one day, '1w' - one week, '1M' - one month).
 DEFAULT:	none
 
-KEY:            [ sql_history_offset | print_history_offset | amqp_history_offset | kafka_history_offset ]
+KEY:            [ sql_history_offset | print_history_offset | amqp_history_offset | kafka_history_offset |
+		  http_history_offset ]
 DESC:		Sets an offset to timeslots basetime. If history is set to 30 mins (by default creating
 		10:00, 10:30, 11:00, etc. time-bins), with an offset of 900 seconds (so 15 mins) it will
 		create 10:15, 10:45, 11:15, etc. time-bins. It expects a positive value, in seconds.
@@ -1412,7 +1469,8 @@ DESC:           Enables recovery mode; recovery mechanism kicks in if DB fails. 
 		systems on a box) to use in the case the primary backend fails.
 DEFAULT:	none
 
-KEY:            [ sql_max_writers | print_max_writers | amqp_max_writers | kafka_max_writers ]
+KEY:            [ sql_max_writers | print_max_writers | amqp_max_writers | kafka_max_writers |
+		  http_max_writers ]
 DESC:           Sets the maximum number of concurrent writer processes the plugin is allowed to start.
 		This setting allows pmacct to degrade gracefully during major backend lock/outages/
 		unavailability. The value is split as follows: up to N-1 concurrent processes will
@@ -1421,7 +1479,8 @@ DESC:           Sets the maximum number of concurrent writer processes the plugi
 		(so, data will be lost at this stage) and an error message is printed out.
 DEFAULT:	10
 
-KEY:		[ sql_cache_entries | print_cache_entries | amqp_cache_entries | kafka_cache_entries ]
+KEY:		[ sql_cache_entries | print_cache_entries | amqp_cache_entries | kafka_cache_entries |
+		  http_cache_entries ]
 DESC:		All plugins have a memory cache in order to store data until next purging event (see
 		refresh time directives, ie. sql_refresh_time). In case of network traffic data, the
 		cache allows to accumulate bytes and packets counters. This directive sets the number
@@ -1489,7 +1548,7 @@ DESC:		If sql_use_copy is true, uses the supplied character as delimiter. This i
 		database, for example certain BGP AS PATHs like "AS1_AS2_AS3_{ASX,ASY,ASZ}".
 DEFAULT:	','
 
-KEY:		[ amqp_multi_values | sql_multi_values | kafka_multi_values ]
+KEY:		[ amqp_multi_values | sql_multi_values | kafka_multi_values | http_multi_values ]
 DESC:		In SQL plugin, sql_multi_values enables the use of multi-values INSERT statements. The value
 		of the directive is intended to be the size (in bytes) of the multi-values buffer. The directive
 		applies only to MySQL and SQLite 3.x plugins. Inserting many rows at the same time is much
@@ -1499,9 +1558,14 @@ DESC:		In SQL plugin, sql_multi_values enables the use of multi-values INSERT st
 		the same with JSON serialization (for Apache Avro see avro_buffer_size); in this case data is
 		encoded in JSON objects newline-separated (preferred to JSON arrays for performance); in AMQP,
 		make sure to set amqp_frame_max to a size that can accommodate the collection of JSON objects.
-DEFAULT:        0
+		In the HTTP plugin, http_multi_values is the maximum size (in bytes) of the body of a request:
+		JSON objects are batched, concatenated back-to-back, until the next one would not fit; batching
+		is always on and a single object larger than the buffer is sent in a request of its own. Check
+		the value against the limits set on the endpoint, ie. client_max_body_size on a proxy.
+DEFAULT:        0; http_multi_values: 131072
 
-KEY:		[ sql_trigger_exec | print_trigger_exec | amqp_trigger_exec | kafka_trigger_exec ]
+KEY:		[ sql_trigger_exec | print_trigger_exec | amqp_trigger_exec | kafka_trigger_exec |
+		  http_trigger_exec ]
 DESC:		Defines the executable to be launched at fixed time intervals to post-process output data;
 		in SQL plugins, intervals are specified by the 'sql_trigger_time' directive; if no interval
 		is supplied 'sql_refresh_time' value is used instead: this will result in a trigger being
@@ -1524,7 +1588,8 @@ NOTES:		* When running in Docker, to avoid the accumulation of zombie processes,
 		  can then output to a file, named differently, that is input for a 3rd party processor.
 DEFAULT:	none
 
-KEY:		[ sql_trigger_exec_async | print_trigger_exec_async | amqp_trigger_exec_async | kafka_trigger_exec_async ]
+KEY:		[ sql_trigger_exec_async | print_trigger_exec_async | amqp_trigger_exec_async | kafka_trigger_exec_async |
+		  http_trigger_exec_async ]
 VALUES:		[ true | false ]
 DESC:		When set to true, trigger commands are executed asynchronously, allowing multiple triggers
 		to run in parallel without blocking each other. When false (default), triggers execute
@@ -1543,7 +1608,7 @@ DESC:		Specifies time interval at which the executable specified by 'sql_trigger
 		the executable will be fired each hour).
 DEFAULT:	none
 
-KEY:		[ sql_preprocess | print_preprocess | amqp_preprocess | kafka_preprocess ]
+KEY:		[ sql_preprocess | print_preprocess | amqp_preprocess | kafka_preprocess | http_preprocess ]
 DESC:		Allows to process aggregates (via a comma-separated list of conditionals and checks, ie.
 		"qnum=1000000, minb=10000") while purging data to the backend thus resulting in a powerful
 		selection tier; aggregates filtered out may be just discarded or saved through the recovery
@@ -1654,7 +1719,8 @@ DESC:		Allows to process aggregates (via a comma-separated list of conditionals 
 		the following line can be used to instrument the print plugin: 'print_preprocess: minb=100000'. 
 DEFAULT:	none
 
-KEY:		[ sql_preprocess_type | print_preprocess_type | amqp_preprocess_type | kafka_preprocess_type ]
+KEY:		[ sql_preprocess_type | print_preprocess_type | amqp_preprocess_type | kafka_preprocess_type |
+		  http_preprocess_type ]
 VALUES:		[ any | all ]
 DESC:		When more checks are to be evaluated, this directive tells whether aggregates on the queue
 		are valid if they just match one of the checks (any) or all of them (all).
@@ -1761,7 +1827,7 @@ VALUES:		[ true | false ]
 		the 6 bits used by DSCP.
 DEFAULT:	false
 
-KEY:		[ print_markers | amqp_markers | kafka_markers ]
+KEY:		[ print_markers | amqp_markers | kafka_markers | http_markers ]
 VALUES:		[ true | false ]
 DESC:		Enables the use of start/end markers each time data is purged to the backend. Both start
 		and end markers return additional information, ie. writer PID, number of entries purged,
@@ -1869,7 +1935,7 @@ DESC:		The URL to a Confluent Avro Schema Registry. The value is passed to libse
 		compatibility type to 'none' as the schema may change.
 DEFAULT:	none
 
-KEY:            [ print_num_protos | sql_num_protos | amqp_num_protos | kafka_num_protos ]
+KEY:            [ print_num_protos | sql_num_protos | amqp_num_protos | kafka_num_protos | http_num_protos ]
 VALUES:         [ true | false ]
 DESC:		Defines whether known IP protocols (ie. tcp, udp) should be presented in string format or
 		left numerical. The default is to look protocol names up. If this feature is not available

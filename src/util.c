@@ -41,6 +41,9 @@
 #ifdef WITH_KAFKA
 #include "kafka_plugin.h"
 #endif
+#ifdef WITH_HTTP
+#include "http_plugin.h"
+#endif
 #ifdef WITH_REDIS
 #include "hiredis/hiredis.h"
 #endif
@@ -2343,6 +2346,9 @@ void version_daemon(int acct_type, char *header)
 #ifdef WITH_KAFKA
   p_kafka_get_version();
 #endif
+#ifdef WITH_HTTP
+  p_http_get_version();
+#endif
 #ifdef WITH_JANSSON
   printf("jansson %s\n", JANSSON_VERSION);
 #endif
@@ -2400,6 +2406,9 @@ void version_daemon(int acct_type, char *header)
 #endif
 #ifdef WITH_KAFKA
     printf("kafka\n");
+#endif
+#ifdef WITH_HTTP
+    printf("http\n");
 #endif
   }
 

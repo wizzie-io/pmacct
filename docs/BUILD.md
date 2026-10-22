@@ -37,6 +37,8 @@ A list of environment variables to pass to `configure`:
   ZMQ_LIBS			linker flags for ZMQ, overriding pkg-config
   KAFKA_CFLAGS			C compiler flags for KAFKA, overriding pkg-config
   KAFKA_LIBS			linker flags for KAFKA, overriding pkg-config
+  HTTP_CFLAGS			C compiler flags for HTTP (libcurl), overriding pkg-config
+  HTTP_LIBS			linker flags for HTTP (libcurl), overriding pkg-config
   REDIS_CFLAGS			C compiler flags for REDIS, overriding pkg-config
   REDIS_LIBS			linker flags for REDIS, overriding pkg-config
   GNUTLS_CFLAGS			C compiler flags for GNUTLS, overriding pkg-config

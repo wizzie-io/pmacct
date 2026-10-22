@@ -620,6 +620,40 @@ AC_ARG_ENABLE(kafka,
 )
 dnl finish: Kafka handling
 
+dnl start: HTTP handling
+AC_MSG_CHECKING(whether to enable HTTP support)
+AC_ARG_ENABLE(http,
+  [  --enable-http                    Enable HTTP support (default: no)],
+  [ case "$enableval" in
+  yes)
+    AC_MSG_RESULT(yes)
+    PKG_CHECK_MODULES([HTTP], [libcurl >= 7.32.0], [
+      PLUGINS="${PLUGINS} http"
+      USING_HTTP="yes"
+      PMACCT_CFLAGS="$PMACCT_CFLAGS $HTTP_CFLAGS"
+      AC_DEFINE(WITH_HTTP, 1)
+      _save_LIBS="$LIBS"
+      LIBS="$LIBS $HTTP_LIBS"
+      AC_CHECK_LIB([curl], [curl_easy_perform])
+      LIBS="$_save_LIBS"
+      _save_CFLAGS="$CFLAGS"
+      CFLAGS="$CFLAGS $HTTP_CFLAGS"
+      AC_CHECK_HEADER([curl/curl.h])
+      CFLAGS="$_save_CFLAGS"
+    ], [
+      AC_MSG_ERROR([Missing libcurl. Refer to: https://curl.se/libcurl/])
+    ])
+    ;;
+  no)
+    AC_MSG_RESULT(no)
+    ;;
+  esac ],
+  [
+    AC_MSG_RESULT(no)
+  ]
+)
+dnl finish: HTTP handling
+
 dnl start: Redis handling
 AC_MSG_CHECKING(whether to enable Redis support)
 AC_ARG_ENABLE(redis,
@@ -1259,6 +1293,7 @@ AM_CONDITIONAL([WITH_RABBITMQ_9], [test x"$USING_RABBITMQ_9" = x"yes"])
 AM_CONDITIONAL([WITH_RABBITMQ_13], [test x"$USING_RABBITMQ_13" = x"yes"])
 AM_CONDITIONAL([WITH_ZMQ], [test x"$USING_ZMQ" = x"yes"])
 AM_CONDITIONAL([WITH_KAFKA], [test x"$USING_KAFKA" = x"yes"])
+AM_CONDITIONAL([WITH_HTTP], [test x"$USING_HTTP" = x"yes"])
 AM_CONDITIONAL([WITH_REDIS], [test x"$USING_REDIS" = x"yes"])
 AM_CONDITIONAL([WITH_GNUTLS], [test x"$USING_GNUTLS" = x"yes"])
 AM_CONDITIONAL([USING_SQL], [test x"$USING_SQL" = x"yes"])
