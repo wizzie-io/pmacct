@@ -98,6 +98,10 @@ void http_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
     exit_gracefully(1);
   }
 
+  if (config.http_label_flatten && !config.pretag_label_encode_as_map) {
+    Log(LOG_WARNING, "WARN ( %s/%s ): 'http_label_flatten' requires 'pre_tag_label_encode_as_map: true'; labels are left as they are.\n", config.name, config.type);
+  }
+
   /* setting some defaults */
   if (!config.sql_table) config.sql_table = default_http_topic;
   if (!config.http_apikey_header) config.http_apikey_header = default_http_apikey_header;
@@ -543,6 +547,17 @@ void http_cache_purge(struct chained_cache *queue[], int index, int safe_action)
 
     if (config.http_event_source) {
       json_object_set_new_nocheck(json_obj, "event_source", json_string(config.http_event_source));
+    }
+
+    /* "label": {"k1": "v1", ..} becomes "k1": "v1", ..; keys never override
+       fields already there */
+    if (config.http_label_flatten) {
+      json_t *label = json_object_get(json_obj, "label");
+
+      if (json_is_object(label)) {
+        json_object_update_missing(json_obj, label);
+        json_object_del(json_obj, "label");
+      }
     }
 
     json_str = compose_json_str(json_obj);

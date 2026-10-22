@@ -118,14 +118,17 @@ class Nfacctd:
         time.sleep(1)
 
 
-def config(endpoint, *extra):
+AGGREGATE = "src_host, dst_host, src_port, dst_port, proto"
+
+
+def config(endpoint, *extra, aggregate=AGGREGATE):
     lines = [
         "daemonize: false",
         "nfacctd_ip: 127.0.0.1",
         "nfacctd_port: %d" % NF_PORT,
         "nfacctd_time_new: true",
         "plugins: http[t]",
-        "aggregate[t]: src_host, dst_host, src_port, dst_port, proto",
+        "aggregate[t]: %s" % aggregate,
         "http_endpoint[t]: %s" % endpoint.url,
         "http_topic[t]: %s" % TOPIC,
         "http_refresh_time[t]: %d" % REFRESH,
@@ -147,9 +150,9 @@ def check(cond, what):
         raise Failure(what)
 
 
-def run_flows(binary, workdir, endpoint, n_records, *extra, wait=purged):
+def run_flows(binary, workdir, endpoint, n_records, *extra, wait=purged, aggregate=AGGREGATE):
     '''Starts nfacctd, sends n_records flows, waits for the purge; returns the log'''
-    nf = Nfacctd(binary, workdir, config(endpoint, *extra))
+    nf = Nfacctd(binary, workdir, config(endpoint, *extra, aggregate=aggregate))
     try:
         time.sleep(2)
         send_netflow_v5(n_records)
@@ -227,6 +230,30 @@ def case_timestamp_no_history(binary, workdir):
         for m in msgs:
             check("stamp_inserted" not in m, "no stamp_inserted without http_history")
             check(isinstance(m.get("ts"), int) and start <= m["ts"] <= time.time(), "ts is the purge time")
+    finally:
+        ep.stop()
+
+
+def case_label_flatten(binary, workdir):
+    '''http_label_flatten moves the keys of the label map to the top level; no label, no fields'''
+    pretag = os.path.join(workdir, "pretag.map")
+    with open(pretag, "w") as f:
+        f.write("set_label=direction%out,site%lab src_net=10.0.0.1/32\n"
+                "set_label=direction%in src_net=10.0.0.2/32\n")
+    ep = Endpoint(200)
+    try:
+        log = run_flows(binary, workdir, ep, 3, "http_apikey[t]: %s" % APIKEY,
+                        "pre_tag_map: %s" % pretag, "pre_tag_label_encode_as_map: true",
+                        "http_label_flatten[t]: true", aggregate=AGGREGATE + ", label")
+        msgs = {m["ip_src"]: m for m in ep.messages()}
+        check(len(msgs) == 3, "3 messages received, got %d" % len(msgs))
+        check(all("label" not in m for m in msgs.values()), "no label field left")
+        check(msgs["10.0.0.1"].get("direction") == "out" and msgs["10.0.0.1"].get("site") == "lab",
+              "10.0.0.1 gets direction out and site lab")
+        check(msgs["10.0.0.2"].get("direction") == "in" and "site" not in msgs["10.0.0.2"],
+              "10.0.0.2 gets direction in only")
+        check("direction" not in msgs["10.0.0.3"], "10.0.0.3 matches no rule and gets no direction")
+        check(not re.search(r"WARN|ERROR", log), "no WARN/ERROR in the log")
     finally:
         ep.stop()
 

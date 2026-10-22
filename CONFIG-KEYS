@@ -961,6 +961,16 @@ DESC:		If set, every message carries an 'event_source' field with this value, ie
 		'pmacct', to tell apart its data from that of other sources sharing a topic.
 DEFAULT:	none
 
+KEY:		http_label_flatten
+VALUES:		[ true | false ]
+DESC:		With 'label' in the aggregation method and pre_tag_label_encode_as_map set to
+		true, labels are encoded as a map, ie. "label": {"direction": "in"}. Setting this
+		knob to true moves each key of that map to the top level of the message instead,
+		ie. "direction": "in", and drops the 'label' field. Keys never override fields
+		already in the message. Data matching no label gets none of these fields. Without
+		pre_tag_label_encode_as_map a warning is logged and labels are left as they are.
+DEFAULT:	false
+
 KEY:            [ bgp_daemon_msglog_kafka_broker_host | bgp_table_dump_kafka_broker_host |
                   bmp_daemon_msglog_kafka_broker_host | bmp_dump_kafka_broker_host |
 		  sfacctd_counter_kafka_broker_host | telemetry_daemon_msglog_kafka_broker_host |
