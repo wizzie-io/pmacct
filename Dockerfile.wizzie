@@ -1,0 +1,53 @@
+# Wizzie image of pmacctd: captures traffic with libpcap, classifies it with
+# nDPI and publishes it over HTTP (http plugin) to Kong + http2k. launch.sh
+# writes the configuration out of environment variables, see README-wizzie.md.
+#
+# Lighter than docker/base/Dockerfile (upstream, left untouched): only the
+# traffic daemons and the backends this image uses.
+
+FROM debian:trixie-slim AS build-stage
+COPY ci/dpkg.cfg.d/excludes /etc/dpkg/dpkg.cfg.d/excludes
+RUN apt-get update && \
+  apt-get install -y --no-install-recommends \
+    autoconf \
+    automake \
+    build-essential \
+    ca-certificates \
+    git \
+    libcurl4-openssl-dev \
+    libjansson-dev \
+    libmaxminddb-dev \
+    libpcap-dev \
+    libtool \
+    pkg-config && \
+  rm -rf /var/lib/apt/lists/*
+
+ARG NUM_WORKERS=4
+ENV MAKEFLAGS="-j${NUM_WORKERS}"
+
+# nDPI: same version as ci/deps.sh
+WORKDIR /tmp
+RUN git clone --depth 1 -b 4.14-stable https://github.com/ntop/nDPI && \
+  cd nDPI && ./autogen.sh && ./configure --prefix=/usr/local/ && make && make install && ldconfig
+
+WORKDIR /tmp/pmacct/
+COPY . .
+RUN ./autogen.sh && \
+  ./configure --enable-jansson --enable-http --enable-ndpi --enable-geoipv2 \
+              --disable-bgp-bins --disable-bmp-bins --disable-st-bins && \
+  make && make install
+
+FROM debian:trixie-slim
+COPY ci/dpkg.cfg.d/excludes /etc/dpkg/dpkg.cfg.d/excludes
+RUN apt-get update && \
+  apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libcurl4 \
+    libjansson4 \
+    libmaxminddb0 \
+    libpcap0.8 && \
+  rm -rf /var/lib/apt/lists/*
+COPY --from=build-stage /usr/local/ /usr/local/
+RUN ldconfig
+COPY launch.sh /usr/local/bin/launch.sh
+CMD ["/usr/local/bin/launch.sh"]
