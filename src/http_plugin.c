@@ -105,6 +105,27 @@ void http_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
     Log(LOG_WARNING, "WARN ( %s/%s ): 'http_label_flatten' requires 'pre_tag_label_encode_as_map: true'; labels are left as they are.\n", config.name, config.type);
   }
 
+#if defined (WITH_GEOIPV2)
+  if (config.http_geoip_asn_file) {
+    MMDB_s asn_db;
+    int status = MMDB_open(config.http_geoip_asn_file, MMDB_MODE_MMAP, &asn_db);
+
+    if (status == MMDB_SUCCESS) {
+      Log(LOG_INFO, "INFO ( %s/%s ): 'http_geoip_asn_file' %s loaded\n", config.name, config.type, config.http_geoip_asn_file);
+      MMDB_close(&asn_db);
+    }
+    else Log(LOG_WARNING, "WARN ( %s/%s ): 'http_geoip_asn_file' can't be loaded yet (%s): AS fields are added once it can.\n", config.name, config.type, MMDB_strerror(status));
+
+    if (!(config.what_to_count & (COUNT_SRC_HOST|COUNT_DST_HOST))) {
+      Log(LOG_WARNING, "WARN ( %s/%s ): 'http_geoip_asn_file' needs src_host and/or dst_host in the aggregation method.\n", config.name, config.type);
+    }
+  }
+#else
+  if (config.http_geoip_asn_file) {
+    Log(LOG_WARNING, "WARN ( %s/%s ): 'http_geoip_asn_file' requires GeoIP support (--enable-geoipv2); ignored.\n", config.name, config.type);
+  }
+#endif
+
 #if !defined (WITH_NDPI)
   if (config.http_class_details) {
     Log(LOG_WARNING, "WARN ( %s/%s ): 'http_class_details' requires nDPI support (--enable-ndpi); ignored.\n", config.name, config.type);
@@ -466,6 +487,39 @@ static void p_http_override(json_t *obj, const char *key, json_t *value)
   json_object_set_new(obj, key, value);
 }
 
+#if defined (WITH_GEOIPV2)
+/* AS of one end of the flow out of a GeoLite2-ASN (or GeoIP2-ISP) database:
+   "asn_ip_<end>" and "as_org_ip_<end>"; nothing if the address is not there */
+static void p_http_geoip_asn(json_t *obj, MMDB_s *db, struct host_addr *addr, const char *end)
+{
+  struct sockaddr_storage ss;
+  MMDB_lookup_result_s result;
+  MMDB_entry_data_s data;
+  char key[SRVBUFLEN];
+  int mmdb_error;
+
+  if (!addr->family) return;
+
+  memset(&ss, 0, sizeof(ss));
+  addr_to_sa((struct sockaddr *) &ss, addr, 0);
+
+  result = MMDB_lookup_sockaddr(db, (struct sockaddr *) &ss, &mmdb_error);
+  if (mmdb_error != MMDB_SUCCESS || !result.found_entry) return;
+
+  if (MMDB_get_value(&result.entry, &data, "autonomous_system_number", NULL) == MMDB_SUCCESS &&
+      data.has_data && data.type == MMDB_DATA_TYPE_UINT32) {
+    snprintf(key, sizeof(key), "asn_ip_%s", end);
+    p_http_override(obj, key, json_integer(data.uint32));
+  }
+
+  if (MMDB_get_value(&result.entry, &data, "autonomous_system_organization", NULL) == MMDB_SUCCESS &&
+      data.has_data && data.type == MMDB_DATA_TYPE_UTF8_STRING) {
+    snprintf(key, sizeof(key), "as_org_ip_%s", end);
+    p_http_override(obj, key, json_stringn(data.utf8_string, data.data_size));
+  }
+}
+#endif
+
 void http_cache_purge(struct chained_cache *queue[], int index, int safe_action)
 {
   char url[LARGEBUFLEN], hdrbuf[LARGEBUFLEN], *topic_esc = NULL;
@@ -476,6 +530,10 @@ void http_cache_purge(struct chained_cache *queue[], int index, int safe_action)
   struct p_http_batch batch;
   struct curl_slist *headers = NULL;
   CURL *curl = NULL;
+#if defined (WITH_GEOIPV2)
+  MMDB_s asn_db;
+  int asn_db_open = FALSE;
+#endif
 
   memset(&batch, 0, sizeof(batch));
 
@@ -533,6 +591,17 @@ void http_cache_purge(struct chained_cache *queue[], int index, int safe_action)
   curl_easy_setopt(curl, CURLOPT_TIMEOUT, (long) config.http_timeout);
   curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, p_http_discard_cb);
+
+#if defined (WITH_GEOIPV2)
+  /* opened at every purge (mmap, cheap): a new version of the file, ie. by
+     geoipupdate, is picked up with no reload */
+  if (config.http_geoip_asn_file) {
+    int status = MMDB_open(config.http_geoip_asn_file, MMDB_MODE_MMAP, &asn_db);
+
+    if (status == MMDB_SUCCESS) asn_db_open = TRUE;
+    else Log(LOG_INFO, "INFO ( %s/%s ): 'http_geoip_asn_file' can't be loaded (%s): no AS fields in this purge.\n", config.name, config.type, MMDB_strerror(status));
+  }
+#endif
 
   if (config.print_markers) {
     void *json_obj = NULL;
@@ -624,6 +693,13 @@ void http_cache_purge(struct chained_cache *queue[], int index, int safe_action)
     }
 #endif
 
+#if defined (WITH_GEOIPV2)
+    if (asn_db_open) {
+      if (config.what_to_count & COUNT_SRC_HOST) p_http_geoip_asn(json_obj, &asn_db, &queue[j]->primitives.src_ip, "src");
+      if (config.what_to_count & COUNT_DST_HOST) p_http_geoip_asn(json_obj, &asn_db, &queue[j]->primitives.dst_ip, "dst");
+    }
+#endif
+
     json_str = compose_json_str(json_obj);
 
     if (json_str) {
@@ -659,6 +735,10 @@ void http_cache_purge(struct chained_cache *queue[], int index, int safe_action)
 
   curl_slist_free_all(headers);
   curl_easy_cleanup(curl);
+
+#if defined (WITH_GEOIPV2)
+  if (asn_db_open) MMDB_close(&asn_db);
+#endif
 
   Log(LOG_INFO, "INFO ( %s/%s ): *** Purging cache - END (PID: %u, QN: %u/%u, ET: %lu) ***\n",
 		config.name, config.type, writer_pid, qn, saved_index, duration);

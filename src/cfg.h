@@ -197,6 +197,7 @@ struct configuration {
   int http_label_flatten;
   int http_class_split;
   int http_class_details;
+  char *http_geoip_asn_file;
   char *kafka_writer_id;
   int print_cache_entries;
   int print_markers;

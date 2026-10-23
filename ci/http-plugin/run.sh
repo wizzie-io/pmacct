@@ -1,7 +1,7 @@
 #!/bin/sh
 #
 # Functional test of the http plugin: builds nfacctd from this source tree with
-# --enable-debug --enable-jansson --enable-http inside a container, then runs
+# --enable-debug --enable-jansson --enable-http --enable-geoipv2 inside a container, then runs
 # harness.py, which feeds it NetFlow v5 and checks what a mock HTTP endpoint
 # receives. Needs Docker and network access (the build clones libcdada).
 #

@@ -18,6 +18,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 NF_PORT = 2100
@@ -66,14 +67,17 @@ class Endpoint:
         return out
 
 
-def send_netflow_v5(n_records):
-    '''One NetFlow v5 packet with n_records TCP flows 10.0.0.x:4000x -> 10.0.1.1:443'''
+def send_netflow_v5(n_records, flows=None):
+    '''One NetFlow v5 packet with n_records TCP flows 10.0.0.x:4000x -> 10.0.1.1:443, or with
+    the given (source, destination) addresses'''
+    flows = flows or [("10.0.0.%d" % (i + 1), "10.0.1.1") for i in range(n_records)]
+    n_records = len(flows)
     uptime = 100000
     header = struct.pack("!HHIIIIBBH", 5, n_records, uptime, int(time.time()), 0, 1, 0, 0, 0)
     records = b""
     for i in range(n_records):
         records += struct.pack("!4s4s4sHHIIIIHHBBBBHHBBH",
-                               socket.inet_aton("10.0.0.%d" % (i + 1)), socket.inet_aton("10.0.1.1"),
+                               socket.inet_aton(flows[i][0]), socket.inet_aton(flows[i][1]),
                                socket.inet_aton("0.0.0.0"), 0, 0, 10, 1000, uptime - 5000, uptime - 1000,
                                40000 + i, 443, 0, 0x18, 6, 0, 0, 0, 0, 0, 0)
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -150,12 +154,12 @@ def check(cond, what):
         raise Failure(what)
 
 
-def run_flows(binary, workdir, endpoint, n_records, *extra, wait=purged, aggregate=AGGREGATE):
-    '''Starts nfacctd, sends n_records flows, waits for the purge; returns the log'''
+def run_flows(binary, workdir, endpoint, n_records, *extra, wait=purged, aggregate=AGGREGATE, flows=None):
+    '''Starts nfacctd, sends n_records flows (or the given ones), waits for the purge; returns the log'''
     nf = Nfacctd(binary, workdir, config(endpoint, *extra, aggregate=aggregate))
     try:
         time.sleep(2)
-        send_netflow_v5(n_records)
+        send_netflow_v5(n_records, flows)
         nf.wait_for(wait, REFRESH * 4)
         return nf.text()
     finally:
@@ -295,6 +299,50 @@ def case_class_details_no_ndpi(binary, workdir):
         check(len(msgs) == 1, "1 message received, got %d" % len(msgs))
         check("application_category" not in msgs[0] and "ip_owner" not in msgs[0], "no nDPI fields")
         check(re.search(r"WARN .*'http_class_details' requires nDPI", log), "WARN about the missing nDPI")
+    finally:
+        ep.stop()
+
+
+# MaxMind's test database, at a fixed commit of github.com/maxmind/MaxMind-DB
+ASN_TEST_DB = ("https://raw.githubusercontent.com/maxmind/MaxMind-DB/"
+               "255b9a8b8a692d70dcaef31dc2ca44fa7ce50ece/test-data/GeoLite2-ASN-Test.mmdb")
+
+
+def case_geoip_asn(binary, workdir):
+    '''http_geoip_asn_file adds the AS number and organization of each end; private addresses get none'''
+    db = os.path.join(workdir, "asn.mmdb")
+    urllib.request.urlretrieve(ASN_TEST_DB, db)
+    ep = Endpoint(200)
+    try:
+        log = run_flows(binary, workdir, ep, 0, "http_apikey[t]: %s" % APIKEY, "http_geoip_asn_file[t]: %s" % db,
+                        flows=[("1.128.0.1", "12.81.96.1"), ("10.0.0.1", "1.0.0.1")])
+        msgs = {m["ip_src"]: m for m in ep.messages()}
+        check(len(msgs) == 2, "2 messages received, got %d" % len(msgs))
+        telstra, private = msgs["1.128.0.1"], msgs["10.0.0.1"]
+        check(telstra.get("asn_ip_src") == 1221 and telstra.get("as_org_ip_src") == "Telstra Pty Ltd",
+              "source AS 1221 Telstra Pty Ltd, got %r" % telstra)
+        check(telstra.get("asn_ip_dst") == 7018 and "as_org_ip_dst" not in telstra,
+              "destination AS 7018, with no organization in the test database")
+        check("asn_ip_src" not in private and "as_org_ip_src" not in private, "no AS for a private address")
+        check(private.get("asn_ip_dst") == 15169 and private.get("as_org_ip_dst") == "Google Inc.",
+              "destination AS 15169 Google Inc., got %r" % private)
+        check(re.search(r"'http_geoip_asn_file' .* loaded", log), "INFO about the database loaded")
+        check(not re.search(r"WARN|ERROR", log), "no WARN/ERROR in the log")
+    finally:
+        ep.stop()
+
+
+def case_geoip_asn_missing(binary, workdir):
+    '''http_geoip_asn_file not there: a warning, and messages go out without AS fields'''
+    ep = Endpoint(200)
+    try:
+        log = run_flows(binary, workdir, ep, 1, "http_apikey[t]: %s" % APIKEY,
+                        "http_geoip_asn_file[t]: %s" % os.path.join(workdir, "none.mmdb"))
+        msgs = ep.messages()
+        check(len(msgs) == 1, "1 message received, got %d" % len(msgs))
+        check(not any(k.startswith(("asn_", "as_org_")) for k in msgs[0]), "no AS fields")
+        check(re.search(r"WARN .*'http_geoip_asn_file' can't be loaded yet", log), "WARN at start")
+        check(re.search(r"INFO .*no AS fields in this purge", log), "INFO at the purge")
     finally:
         ep.stop()
 

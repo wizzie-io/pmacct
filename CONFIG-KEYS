@@ -971,7 +971,8 @@ DEFAULT:	none
 KEY:		http_override_prefix
 DESC:		When the plugin replaces a field pmacct already put in a message (currently
 		'event_type' via http_event_type, 'l7_protocol' and 'application' via
-		http_class_split, 'application_category' and 'ip_owner' via http_class_details), the original value is kept in a field named
+		http_class_split, 'application_category' and 'ip_owner' via http_class_details, AS fields via
+		http_geoip_asn_file), the original value is kept in a field named
 		after this prefix plus the original name, ie. with 'pmacct_' the message carries
 		"event_type": "pmacct_flow", "pmacct_event_type": "purge". If not set, the
 		original value is dropped.
@@ -1008,6 +1009,18 @@ DESC:		With 'class' in the aggregation method and nDPI support compiled in, adds
 		"Google"; "Unknown" if none). Without nDPI a warning is logged and the knob is
 		ignored.
 DEFAULT:	false
+
+KEY:		http_geoip_asn_file
+DESC:		Full pathname to a MaxMind GeoLite2-ASN (or GeoIP2-ISP) database, binary format. If set
+		and pmacct is compiled with --enable-geoipv2, each message gets the AS of its source and
+		destination IP addresses (src_host, dst_host in the aggregation method): 'asn_ip_src',
+		'asn_ip_dst' (AS number) and 'as_org_ip_src', 'as_org_ip_dst' (AS organization, ie.
+		"Google LLC"). Addresses not in the database, ie. private ones, get none of these
+		fields. The database is opened at every purge, so a new version of the file (ie. written
+		by geoipupdate) is used with no reload; if it can't be opened, that purge goes without
+		AS fields. Independent of geoipv2_file, which feeds the GeoIP primitives. Without
+		--enable-geoipv2 a warning is logged and the knob is ignored.
+DEFAULT:	none
 
 KEY:            [ bgp_daemon_msglog_kafka_broker_host | bgp_table_dump_kafka_broker_host |
                   bmp_daemon_msglog_kafka_broker_host | bmp_dump_kafka_broker_host |
