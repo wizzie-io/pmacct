@@ -372,6 +372,9 @@ def case_local_geo(binary, workdir):
         check(other.get("country_ip_src") == "" and "asn_ip_src" not in other and other.get("lat_ip_src") == 0,
               "an address out of http_local_networks is left as it is, got %r" % other)
         check(other.get("asn_ip_dst") == 1221, "public destination keeps its AS")
+        body = b"".join(body for _, _, body in ep.requests).decode()
+        check('"lon_ip_src": -6.0639,' in body and "-6.06390000" not in body,
+              "decimals with 10 significant digits: -6.0639, not -6.0639000000000003")
         check(not re.search(r"WARN|ERROR", log), "no WARN/ERROR in the log")
     finally:
         ep.stop()

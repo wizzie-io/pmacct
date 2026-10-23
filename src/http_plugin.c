@@ -39,6 +39,10 @@ char default_http_apikey_header[] = "apikey";
 
 static void p_http_local_init(void);
 
+/* significant digits of the decimal numbers (coordinates): 10 keep 7 decimals
+   in any of them, about 1 cm, and spare "-6.0639000000000003" */
+#define HTTP_REAL_PRECISION 10
+
 /* Functions */
 void http_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 {
@@ -645,6 +649,16 @@ static void p_http_local_geo(json_t *obj, struct host_addr *addr, const char *en
   }
 }
 
+/* compose_json_str() with fewer digits for decimal numbers */
+static char *p_http_json_str(json_t *obj)
+{
+  char *str = json_dumps(obj, JSON_PRESERVE_ORDER | JSON_REAL_PRECISION(HTTP_REAL_PRECISION));
+
+  json_decref(obj);
+
+  return str;
+}
+
 void http_cache_purge(struct chained_cache *queue[], int index, int safe_action)
 {
   char url[LARGEBUFLEN], hdrbuf[LARGEBUFLEN], *topic_esc = NULL;
@@ -734,7 +748,7 @@ void http_cache_purge(struct chained_cache *queue[], int index, int safe_action)
 
     json_obj = compose_purge_init_json(config.name, writer_pid);
 
-    if (json_obj) json_str = compose_json_str(json_obj);
+    if (json_obj) json_str = p_http_json_str(json_obj);
     if (json_str) {
       Log(LOG_DEBUG, "DEBUG ( %s/%s ): %s\n\n", config.name, config.type, json_str);
       ret = p_http_produce(curl, url, &batch, json_str, NULL, FALSE);
@@ -830,7 +844,7 @@ void http_cache_purge(struct chained_cache *queue[], int index, int safe_action)
       if (config.what_to_count & COUNT_DST_HOST) p_http_local_geo(json_obj, &queue[j]->primitives.dst_ip, "dst");
     }
 
-    json_str = compose_json_str(json_obj);
+    json_str = p_http_json_str(json_obj);
 
     if (json_str) {
       Log(LOG_DEBUG, "DEBUG ( %s/%s ): %s\n\n", config.name, config.type, json_str);
@@ -853,7 +867,7 @@ void http_cache_purge(struct chained_cache *queue[], int index, int safe_action)
 
     json_obj = compose_purge_close_json(config.name, writer_pid, qn, saved_index, duration);
 
-    if (json_obj) json_str = compose_json_str(json_obj);
+    if (json_obj) json_str = p_http_json_str(json_obj);
     if (json_str) {
       Log(LOG_DEBUG, "DEBUG ( %s/%s ): %s\n\n", config.name, config.type, json_str);
       p_http_post(curl, url, json_str, strlen(json_str), 1);
