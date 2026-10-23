@@ -69,3 +69,4 @@ docker/.buildx_config.toml
 CLAUDE.md
 
 .claude/
+pyflow/**/__pycache__/

@@ -11,9 +11,14 @@ Es la rama `1.8.0-wizzie` del fork `wizzie-io/pmacct`. Lo que añade sobre el up
   concatenados en `POST <HTTP_ENDPOINT>/v1/data/<EVENTS_TOPIC>` con la cabecera `apikey`,
   compatible con [n2kafka](https://github.com/wizzie-io/n2kafka) (decoder http2k). Las claves
   `http_*` están documentadas en `CONFIG-KEYS`.
-- `Dockerfile.wizzie` y `launch.sh`: la imagen y su arranque. `launch.sh` genera la
-  configuración de pmacctd a partir de variables de entorno y lanza el capturador.
+- Este directorio, `pyflow/`: la imagen (`Dockerfile`) y su proceso principal, **pyflow**
+  (`pyflow.py` y el paquete `wizzie/`). pyflow lee las variables de entorno, genera los ficheros
+  de configuración de pmacctd, lo lanza y lo vigila: si pmacctd termina, pyflow termina con su
+  mismo código, y al parar el contenedor para pmacctd de forma ordenada. Es la base del
+  futuro manager de Insight, al estilo de pykatok o pyprobes. `launch.sh` solo arranca pyflow.
 - `ci/http-plugin/`: la prueba funcional del plugin.
+
+Todo lo propio de Wizzie, salvo el plugin y su prueba, está en `pyflow/`.
 
 ### Mensajes publicados
 
@@ -63,14 +68,16 @@ analítica de Insight, `EVENTS_TOPIC` tiene que ser `default_index`.
 ### Construyendo la imagen docker
 
 Las versiones se marcan con etiquetas `wizzie-v<versión de pmacct>-<revisión>`, por ejemplo
-`wizzie-v1.8.0-1`, y la imagen toma esa etiqueta como versión:
+`wizzie-v1.8.0-1`, y la imagen toma esa etiqueta como versión (`VERSION`, que pyflow muestra al
+arrancar). Se construye desde la raíz del repositorio, porque compila el código de pmacct:
 
 ```sh
 $ git clone git@github.com:wizzie-io/pmacct.git
 $ cd pmacct
 $ git checkout 1.8.0-wizzie
 $ git fetch --tags
-$ docker buildx build -f Dockerfile.wizzie --platform=linux/amd64 -t europe-west1-docker.pkg.dev/wizzie-registry/wdp-public/pmacctd:$(git describe --tags --match "wizzie-v*") .
+$ V=$(git describe --tags --match "wizzie-v*")
+$ docker buildx build -f pyflow/Dockerfile --platform=linux/amd64 --build-arg VERSION=$V -t europe-west1-docker.pkg.dev/wizzie-registry/wdp-public/pmacctd:$V .
 ```
 
 Para publicar una versión nueva, se etiqueta el commit, se construye y se sube la imagen:
@@ -79,20 +86,23 @@ Para publicar una versión nueva, se etiqueta el commit, se construye y se sube 
 $ git tag -a wizzie-v1.8.0-1 -m "pmacctd wizzie v1.8.0-1"
 $ git push origin wizzie-v1.8.0-1
 $ gcloud auth configure-docker europe-west1-docker.pkg.dev   # una vez por máquina
-$ docker buildx build -f Dockerfile.wizzie --platform=linux/amd64 -t europe-west1-docker.pkg.dev/wizzie-registry/wdp-public/pmacctd:$(git describe --tags --match "wizzie-v*") --push .
+$ V=$(git describe --tags --match "wizzie-v*")
+$ docker buildx build -f pyflow/Dockerfile --platform=linux/amd64 --build-arg VERSION=$V -t europe-west1-docker.pkg.dev/wizzie-registry/wdp-public/pmacctd:$V --push .
 ```
 
 - Con `--platform=linux/amd64,linux/arm64` se sube una imagen multiarquitectura. En una máquina
   de otra arquitectura la compilación va emulada y tarda bastante más.
 - Fuera de un commit etiquetado, `git describe` da `wizzie-v1.8.0-1-3-g<hash>`: sirve para
   imágenes de prueba, pero no se deben subir como versión.
-- `Dockerfile.wizzie` compila solo los demonios de tráfico con los backends que usa esta
+- `pyflow/Dockerfile` compila solo los demonios de tráfico con los backends que usa esta
   imagen (`http`, nDPI, jansson y GeoIP). El `docker/` del upstream no se modifica.
 
-Antes de etiquetar, conviene pasar la prueba del plugin (unos 3 minutos, necesita Docker):
+Antes de etiquetar, conviene pasar la prueba del plugin (unos 3 minutos, necesita Docker) y las
+de pyflow (generación de la configuración, solo Python 3.10 o posterior):
 
 ```sh
 $ ci/http-plugin/run.sh
+$ (cd pyflow && python3 -m unittest discover tests)
 ```
 
 ### Ejecución
@@ -116,7 +126,7 @@ services:
       LOCAL_NETWORKS: 192.168.102.0/24
 ```
 
-Al arrancar, `launch.sh` escribe en el log la configuración generada (con la API key oculta) y
+Al arrancar, pyflow escribe en el log la configuración generada (con la API key oculta) y
 el `pretag.map`. Cada purga termina con `Purging cache - END (... QN: n/m ...)`: `n` mensajes
 entregados de `m`. Es normal que `n` sea algo menor que `m`, porque lo que llega durante el
 cambio de minuto se envía en la purga siguiente. Si una entrega falla, se reintenta y después
@@ -160,13 +170,14 @@ se definen; si se definen vacías, se desactiva lo que hacen.
 | `CACHE_ENTRIES` | `""` | Tamaño de la tabla de agregación (por defecto el de pmacct, 16411). Subirlo si el log avisa de que se llena |
 | `DEBUG` | `False` | Log de depuración de pmacctd, que incluye cada mensaje publicado |
 | `EXTRA_CONFIG` | `""` | Líneas de configuración de pmacctd que se añaden al final, para claves no cubiertas por estas variables (ver `CONFIG-KEYS`). El plugin se llama `wdp`, p. ej. `http_markers[wdp]: true` |
+| `LOG_LEVEL` | `INFO` | Nivel del log de pyflow (`DEBUG`, `INFO`, `WARNING`, `ERROR`). El de pmacctd va con `DEBUG` |
 | `CONFIG_DIR` | `/tmp/pmacct` | Directorio donde se generan los ficheros de configuración |
 | `PMACCTD_CONFIG_FILE` | `""` | Configuración completa de pmacctd montada en el contenedor. Si se define, se usa tal cual y se ignoran las demás variables |
 | `PCAP_SAVEFILE` | `""` | Pruebas: lee los paquetes de un fichero pcap en lugar de una interfaz y termina al acabarlo |
 
 ### Configuración generada
 
-Con las variables del ejemplo de ejecución, `launch.sh` genera en `CONFIG_DIR`:
+Con las variables del ejemplo de ejecución, pyflow genera en `CONFIG_DIR`:
 
 - `pmacctd.conf`: captura, clasificación y el plugin `http` (instancia `wdp`).
 - `pretag.map`: con `LOCAL_NETWORKS`, las reglas que ponen `direction`. Se aplica la primera

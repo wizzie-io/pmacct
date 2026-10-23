@@ -1,6 +1,9 @@
 # Wizzie image of pmacctd: captures traffic with libpcap, classifies it with
-# nDPI and publishes it over HTTP (http plugin) to Kong + http2k. launch.sh
-# writes the configuration out of environment variables, see README-wizzie.md.
+# nDPI and publishes it over HTTP (http plugin) to Kong + http2k. pyflow, the
+# main process, writes the pmacctd configuration out of environment variables
+# and runs pmacctd, see README.md. Built from the root of the repository:
+#
+#   docker buildx build -f pyflow/Dockerfile .
 #
 # Lighter than docker/base/Dockerfile (upstream, left untouched): only the
 # traffic daemons and the backends this image uses.
@@ -45,9 +48,22 @@ RUN apt-get update && \
     libcurl4 \
     libjansson4 \
     libmaxminddb0 \
-    libpcap0.8 && \
+    libpcap0.8 \
+    python3 \
+    tini && \
   rm -rf /var/lib/apt/lists/*
 COPY --from=build-stage /usr/local/ /usr/local/
 RUN ldconfig
-COPY launch.sh /usr/local/bin/launch.sh
-CMD ["/usr/local/bin/launch.sh"]
+
+WORKDIR /app
+COPY pyflow/launch.sh pyflow/pyflow.py /app/
+COPY pyflow/wizzie/ /app/wizzie/
+
+# Version of the image: passed with --build-arg and read by pyflow at start. Last, so that
+# changing it does not invalidate the cache of the layers above
+ARG VERSION=unknown
+ENV PYFLOW_VERSION=${VERSION}
+LABEL org.opencontainers.image.version=${VERSION}
+
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["/app/launch.sh"]
