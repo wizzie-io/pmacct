@@ -143,6 +143,8 @@ class PmacctdConfig:
             lines.append(f"http_class_details[{p}]: true")
         if c["geoip_asn_file"]:
             lines.append(f"http_geoip_asn_file[{p}]: {c['geoip_asn_file']}")
+        if c["geoipv2_file"] and "coords" in self.conf.items("geoip_fields") and c["h3_resolution"]:
+            lines.append(f"http_h3_resolution[{p}]: {c['h3_resolution']}")
         if c["geoipv2_file"] and "city" in self.conf.items("geoip_fields"):
             lines.append(f"http_geoip_city_file[{p}]: {c['geoipv2_file']}")
             lines.append(f"http_geoip_lang[{p}]: {c['geoip_lang']}")

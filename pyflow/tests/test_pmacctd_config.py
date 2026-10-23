@@ -172,6 +172,15 @@ class PmacctdConfigTest(unittest.TestCase):
         values, calls, _ = self.resolve(GEOIPV2_FILE="/g/city.mmdb")  # no LOCAL_NETWORKS
         self.assertEqual((values, calls), ({}, []))
 
+    def test_h3(self):
+        conf = self.render(GEOIPV2_FILE="/g/city.mmdb", GEOIP_FIELDS="country,coords")["pmacctd.conf"]
+        self.assertIn("http_h3_resolution[wdp]: 7\n", conf)
+        self.assertIn("http_h3_resolution[wdp]: 9\n", self.render(GEOIPV2_FILE="/g/city.mmdb", GEOIP_FIELDS="coords", H3_RESOLUTION="9")["pmacctd.conf"])
+        self.assertNotIn("http_h3", self.render(GEOIPV2_FILE="/g/city.mmdb", GEOIP_FIELDS="coords", H3_RESOLUTION="")["pmacctd.conf"])
+        self.assertNotIn("http_h3", self.render(GEOIPV2_FILE="/g/city.mmdb")["pmacctd.conf"], "no coordinates, no cells")
+        with self.assertRaises(ConfigError):
+            Configuration(dict(BASE, H3_RESOLUTION="16"))
+
     def test_geoip_city(self):
         conf = self.render(GEOIPV2_FILE="/g/city.mmdb", GEOIP_FIELDS="country,city")["pmacctd.conf"]
         self.assertIn("http_geoip_city_file[wdp]: /g/city.mmdb\n", conf)

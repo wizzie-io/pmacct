@@ -16,6 +16,7 @@ RUN apt-get update && \
     automake \
     build-essential \
     ca-certificates \
+    cmake \
     git \
     libcurl4-openssl-dev \
     libjansson-dev \
@@ -33,10 +34,17 @@ WORKDIR /tmp
 RUN git clone --depth 1 -b 4.14-stable https://github.com/ntop/nDPI && \
   cd nDPI && ./autogen.sh && ./configure --prefix=/usr/local/ && make && make install && ldconfig
 
+# H3 (Uber's geospatial index), for the H3 cells of the http plugin
+RUN git clone --depth 1 -b v4.5.0 https://github.com/uber/h3 && \
+  cmake -S h3 -B h3/build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DBUILD_TESTING=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_FUZZERS=OFF -DBUILD_FILTERS=OFF -DBUILD_GENERATORS=OFF \
+        -DENABLE_DOCS=OFF -DENABLE_FORMAT=OFF -DENABLE_LINTING=OFF && \
+  cmake --build h3/build && cmake --install h3/build && ldconfig
+
 WORKDIR /tmp/pmacct/
 COPY . .
 RUN ./autogen.sh && \
-  ./configure --enable-jansson --enable-http --enable-ndpi --enable-geoipv2 \
+  ./configure --enable-jansson --enable-http --enable-ndpi --enable-geoipv2 --enable-h3 \
               --disable-bgp-bins --disable-bmp-bins --disable-st-bins && \
   make && make install
 

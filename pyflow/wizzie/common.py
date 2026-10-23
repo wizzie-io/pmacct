@@ -25,7 +25,8 @@ class Configuration:
                       "local_country", "local_asn", "local_as_org", "local_coords", "local_city", "local_region",
                       "local_ip", "ipinfo_token"}
     # Keys an empty value disables instead of taking the default
-    _EMPTY_DISABLES = {"history_roundoff", "timestamp_field", "event_source", "event_type", "override_prefix", "geoip_fields"}
+    _EMPTY_DISABLES = {"history_roundoff", "timestamp_field", "event_source", "event_type", "override_prefix", "geoip_fields",
+                       "h3_resolution"}
     # Keys whose value is never written to the log
     _SECRET_KEYS = {"api_key", "ipinfo_token"}
 
@@ -73,6 +74,7 @@ class Configuration:
             "geoipv2_file": None,  # MaxMind database (.mmdb): enables the GeoIP fields
             "geoip_fields": "country",  # GeoIP fields added with GEOIPV2_FILE: country, pocode, coords, city (and region)
             "geoip_lang": "es",  # language of the city and region names
+            "h3_resolution": "7",  # H3 cells of the coordinates (h3_src/h3_dst), 0 to 15; with coords in GEOIP_FIELDS
             "geoip_asn_file": None,  # MaxMind GeoLite2-ASN database (.mmdb): enables the AS fields
             # where the probe is, for the addresses of LOCAL_NETWORKS (see localgeo.py): these, or ipinfo.io
             "local_country": None,  # ISO code, ie. ES
@@ -154,6 +156,8 @@ class Configuration:
         if self.config["local_coords"] and not re.fullmatch(r"\s*-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?\s*", self.config["local_coords"]):
             raise ConfigError(f"LOCAL_COORDS \"{self.config['local_coords']}\" is not valid, expected <latitude>,<longitude>")
         self.config["local_coords"] = self.config["local_coords"] and self.config["local_coords"].replace(" ", "")
+        if self.config["h3_resolution"] and not (self.config["h3_resolution"].isdigit() and int(self.config["h3_resolution"]) <= 15):
+            raise ConfigError(f"H3_RESOLUTION \"{self.config['h3_resolution']}\" is not valid, expected 0 to 15")
         if self.config["local_ip"]:
             try:
                 ipaddress.ip_address(self.config["local_ip"])

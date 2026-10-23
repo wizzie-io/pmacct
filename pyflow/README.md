@@ -95,7 +95,7 @@ $ docker buildx build -f pyflow/Dockerfile --platform=linux/amd64 --build-arg VE
 - Fuera de un commit etiquetado, `git describe` da `wizzie-v1.8.0-1-3-g<hash>`: sirve para
   imágenes de prueba, pero no se deben subir como versión.
 - `pyflow/Dockerfile` compila solo los demonios de tráfico con los backends que usa esta
-  imagen (`http`, nDPI, jansson y GeoIP). El `docker/` del upstream no se modifica.
+  imagen (`http`, nDPI, jansson, GeoIP y H3). El `docker/` del upstream no se modifica.
 
 Antes de etiquetar, conviene pasar la prueba del plugin (unos 3 minutos, necesita Docker) y las
 de pyflow (generación de la configuración, solo Python 3.10 o posterior):
@@ -185,9 +185,16 @@ volumes:
   (primer nivel de subdivisión: en España, la comunidad autónoma), en `GEOIP_LANG`. GeoLite2
   trae el español para muchas ciudades y regiones; DB-IP Lite solo en inglés. Es el dato menos
   fiable de GeoIP: en muchas IPs falta o es la del nodo del operador o de la CDN.
+- **Celdas H3** ([h3geo.org](https://h3geo.org)): con `coords`, cada extremo con coordenadas lleva
+  sus celdas H3 en texto hexadecimal, como `h3_cell` de pykatok: `h3_src`/`h3_dst` con la
+  resolución de `H3_RESOLUTION` y, con resoluciones fijas, `h3_city_*` (5), `h3_region_*` (3) y
+  `h3_country_*` (2). Son hexágonos, no límites administrativos: `h3_country_*` es la celda que
+  contiene el punto, no el país (para eso está `country_ip_*`). Las coordenadas de GeoIP son el
+  centro aproximado de una ciudad, con errores de kilómetros, así que una resolución por encima
+  de 7 da una precisión que el dato no tiene. Las IPs sin coordenadas (`0, 0`) no llevan celdas.
 - **IPs locales**: con `LOCAL_NETWORKS`, las IPs de las redes locales reciben en los campos que
   GeoIP deja vacíos los datos de la sede: país, AS de su salida a Internet y, con `coords` y
-  `city`, sus coordenadas, ciudad y región. Se toman de `LOCAL_COUNTRY`, `LOCAL_ASN`, `LOCAL_AS_ORG`, `LOCAL_COORDS`,
+  `city`, sus coordenadas (y con ellas sus celdas H3), ciudad y región. Se toman de `LOCAL_COUNTRY`, `LOCAL_ASN`, `LOCAL_AS_ORG`, `LOCAL_COORDS`,
   `LOCAL_CITY` y `LOCAL_REGION` y, para lo que no esté definido, de ipinfo.io, que localiza la IP
   pública con la que sale la sonda. La ciudad y la región no se toman de ipinfo.io sino de la base
   de GeoIP para esa IP, para que vayan en el mismo idioma que las demás. Lo que
@@ -232,6 +239,7 @@ se definen; si se definen vacías, se desactiva lo que hacen.
 | `CLASS_DETAILS` | `True` | Añade `application_category` e `ip_owner` (ver *Mensajes publicados*). Solo con `class` en `AGGREGATE` |
 | `GEOIPV2_FILE` | `""` | Base de datos GeoIP (`.mmdb`, MaxMind GeoLite2/GeoIP2 o DB-IP) en un volumen. Activa los campos de `GEOIP_FIELDS`; ver *GeoIP* |
 | `GEOIP_FIELDS` | `country` | Con `GEOIPV2_FILE`, campos de GeoIP separados por comas: `country` (`country_ip_src`/`_dst`), `pocode` (código postal), `coords` (`lat_ip_*`/`lon_ip_*`) y `city` (`city_ip_*` y `region_ip_*`, la ciudad y la región o comunidad autónoma, que añade el plugin http porque pmacct no tiene primitivas para ellas). `pocode`, `coords` y `city` necesitan una base de datos City. *Vacía desactiva* (las primitivas se ponen a mano en `AGGREGATE`) |
+| `H3_RESOLUTION` | `7` | Con `coords` en `GEOIP_FIELDS`, resolución (0 a 15) de las celdas H3 `h3_src`/`h3_dst` (7: unos 5 km²). Además salen `h3_city_*` (5, ~250 km²), `h3_region_*` (3, ~12.400 km²) y `h3_country_*` (2, ~87.000 km²). *Vacía desactiva*; ver *GeoIP* |
 | `GEOIP_LANG` | `es` | Idioma de los nombres de ciudad y región (`es`, `en`, `de`, `fr`, `pt-BR`…). Si la base no tiene el nombre en ese idioma, va en inglés |
 | `GEOIP_ASN_FILE` | `""` | Base de datos GeoLite2-ASN (`.mmdb`) en un volumen. Añade `asn_ip_src`/`asn_ip_dst` (número de AS) y `as_org_ip_src`/`as_org_ip_dst` (organización). Necesita `src_host` y `dst_host` en `AGGREGATE`; ver *GeoIP* |
 | `LOCAL_COUNTRY` | `""` | Con `LOCAL_NETWORKS`, país (código ISO, p. ej. `ES`) que se da a las IPs locales, que no están en la base de GeoIP. Sin definir, se pregunta a ipinfo.io (`LOCAL_GEO_LOOKUP`); ver *GeoIP* |
