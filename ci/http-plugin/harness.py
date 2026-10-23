@@ -421,6 +421,35 @@ def case_geoip_city(binary, workdir):
         ep.stop()
 
 
+def case_h3(binary, workdir):
+    '''http_h3_resolution: H3 cells of each end with coordinates, at that resolution and at 5, 3 and
+    2; none for 0, 0. Expected cells computed with the h3 Python library'''
+    city = os.path.join(workdir, "city.mmdb")
+    urllib.request.urlretrieve(CITY_TEST_DB, city)
+    ep = Endpoint(200)
+    try:
+        log = run_flows(binary, workdir, ep, 0, "http_apikey[t]: %s" % APIKEY, "geoipv2_file: %s" % city,
+                        "http_h3_resolution[t]: 7", "http_local_networks[t]: 10.0.0.0/24",
+                        "http_local_coords[t]: 37.3446,-6.0639",
+                        aggregate=AGGREGATE + ", src_host_coords, dst_host_coords",
+                        flows=[("10.0.0.1", "81.2.69.142"), ("10.9.9.9", "81.2.69.142")])
+        msgs = {m["ip_src"]: m for m in ep.messages()}
+        check(len(msgs) == 2, "2 messages received, got %d" % len(msgs))
+        local, other = msgs["10.0.0.1"], msgs["10.9.9.9"]
+        london = {"h3_dst": "87194ad30ffffff", "h3_city_dst": "85194ad3fffffff",
+                  "h3_region_dst": "83194afffffffff", "h3_country_dst": "82194ffffffffff"}
+        site = {"h3_src": "87391c71effffff", "h3_city_src": "85391c73fffffff",
+                "h3_region_src": "83391cfffffffff", "h3_country_src": "82391ffffffffff"}
+        for key, cell in list(london.items()) + list(site.items()):
+            check(local.get(key) == cell, "%s %s, got %r" % (key, cell, local.get(key)))
+        check(all(other.get(key) == cell for key, cell in london.items()), "destination cells in the other message too")
+        check(not any(key.endswith("_src") and key.startswith("h3") for key in other),
+              "no cells for 0, 0 (a private address out of the local networks)")
+        check(not re.search(r"WARN|ERROR", log), "no WARN/ERROR in the log")
+    finally:
+        ep.stop()
+
+
 def case_retry_5xx(binary, workdir):
     '''5xx is retried http_retries times, then the batch is dropped with an ERROR'''
     ep = Endpoint(500)

@@ -654,6 +654,28 @@ AC_ARG_ENABLE(http,
 )
 dnl finish: HTTP handling
 
+dnl start: H3 handling (Wizzie: H3 cells of the coordinates, http plugin)
+AC_MSG_CHECKING(whether to enable H3 support)
+AC_ARG_ENABLE(h3,
+  [  --enable-h3                      Enable H3 (Uber's geospatial index) support (default: no)],
+  [ case "$enableval" in
+  yes)
+    AC_MSG_RESULT(yes)
+    AC_CHECK_HEADER([h3/h3api.h], [], [AC_MSG_ERROR([Missing H3 headers. Refer to: https://github.com/uber/h3])])
+    AC_CHECK_LIB([h3], [latLngToCell], [], [AC_MSG_ERROR([Missing H3 library. Refer to: https://github.com/uber/h3])])
+    SUPPORTS="${SUPPORTS} h3"
+    AC_DEFINE(WITH_H3, 1)
+    ;;
+  no)
+    AC_MSG_RESULT(no)
+    ;;
+  esac ],
+  [
+    AC_MSG_RESULT(no)
+  ]
+)
+dnl finish: H3 handling
+
 dnl start: Redis handling
 AC_MSG_CHECKING(whether to enable Redis support)
 AC_ARG_ENABLE(redis,

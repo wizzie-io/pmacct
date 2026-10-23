@@ -29,6 +29,9 @@
 #if defined (WITH_NDPI)
 #include "ndpi/ndpi.h"
 #endif
+#if defined (WITH_H3)
+#include <h3/h3api.h>
+#endif
 #ifndef WITH_JANSSON
 #error "--enable-http requires --enable-jansson"
 #endif
@@ -46,6 +49,17 @@ static void p_http_mmdb_check(const char *, const char *, const char *);
 /* significant digits of the decimal numbers (coordinates): 10 keep 7 decimals
    in any of them, about 1 cm, and spare "-6.0639000000000003" */
 #define HTTP_REAL_PRECISION 10
+
+/* H3 cells of the coordinates: "h3_<end>" at http_h3_resolution, the coarser
+   ones at fixed resolutions (city ~250 km2, region ~12,400 km2, country
+   ~87,000 km2; hexagons, not administrative boundaries) */
+#define HTTP_H3_CITY_RES	5
+#define HTTP_H3_REGION_RES	3
+#define HTTP_H3_COUNTRY_RES	2
+
+#if defined (WITH_H3)
+static int h3_resolution = -1;
+#endif
 
 /* Functions */
 void http_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
@@ -126,6 +140,23 @@ void http_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 #endif
 
   p_http_local_init();
+
+  if (config.http_h3_resolution) {
+#if defined (WITH_H3)
+    char *endptr;
+    long res = strtol(config.http_h3_resolution, &endptr, 10);
+
+    if (*endptr || res < 0 || res > 15) {
+      Log(LOG_WARNING, "WARN ( %s/%s ): 'http_h3_resolution' must be 0 to 15; no H3 cells.\n", config.name, config.type);
+    }
+    else if (!(config.what_to_count_2 & COUNT_SRC_HOST_COORDS) && !(config.what_to_count_2 & COUNT_DST_HOST_COORDS)) {
+      Log(LOG_WARNING, "WARN ( %s/%s ): 'http_h3_resolution' needs src_host_coords and/or dst_host_coords in the aggregation method.\n", config.name, config.type);
+    }
+    else h3_resolution = res;
+#else
+    Log(LOG_WARNING, "WARN ( %s/%s ): 'http_h3_resolution' requires H3 support (--enable-h3); ignored.\n", config.name, config.type);
+#endif
+  }
 
 #if !defined (WITH_NDPI)
   if (config.http_class_details) {
@@ -759,6 +790,46 @@ static void p_http_local_geo(json_t *obj, struct host_addr *addr, const char *en
   }
 }
 
+#if defined (WITH_H3)
+static void p_http_h3_cell(json_t *obj, const LatLng *point, int res, const char *prefix, const char *end)
+{
+  char key[SRVBUFLEN], cell_str[17];
+  H3Index cell;
+
+  if (latLngToCell(point, res, &cell) != E_SUCCESS) return;
+  if (h3ToString(cell, cell_str, sizeof(cell_str)) != E_SUCCESS) return;
+
+  snprintf(key, sizeof(key), "%s%s", prefix, end);
+  p_http_override(obj, key, json_string(cell_str));
+}
+
+/* H3 cells of one end of the flow, out of its coordinates (lat_ip_<end>,
+   lon_ip_<end>) once GeoIP and http_local_coords are done; none at 0, 0,
+   what GeoIP gives to the addresses it doesn't know */
+static void p_http_h3(json_t *obj, const char *end)
+{
+  char lat_key[SRVBUFLEN], lon_key[SRVBUFLEN];
+  json_t *lat, *lon;
+  LatLng point;
+
+  snprintf(lat_key, sizeof(lat_key), "lat_ip_%s", end);
+  snprintf(lon_key, sizeof(lon_key), "lon_ip_%s", end);
+  lat = json_object_get(obj, lat_key);
+  lon = json_object_get(obj, lon_key);
+
+  if (!json_is_number(lat) || !json_is_number(lon)) return;
+  if (!json_number_value(lat) && !json_number_value(lon)) return;
+
+  point.lat = degsToRads(json_number_value(lat));
+  point.lng = degsToRads(json_number_value(lon));
+
+  p_http_h3_cell(obj, &point, h3_resolution, "h3_", end);
+  p_http_h3_cell(obj, &point, HTTP_H3_CITY_RES, "h3_city_", end);
+  p_http_h3_cell(obj, &point, HTTP_H3_REGION_RES, "h3_region_", end);
+  p_http_h3_cell(obj, &point, HTTP_H3_COUNTRY_RES, "h3_country_", end);
+}
+#endif
+
 /* compose_json_str() with fewer digits for decimal numbers */
 static char *p_http_json_str(json_t *obj)
 {
@@ -957,6 +1028,13 @@ void http_cache_purge(struct chained_cache *queue[], int index, int safe_action)
       if (config.what_to_count & COUNT_SRC_HOST) p_http_local_geo(json_obj, &queue[j]->primitives.src_ip, "src", local_city_db);
       if (config.what_to_count & COUNT_DST_HOST) p_http_local_geo(json_obj, &queue[j]->primitives.dst_ip, "dst", local_city_db);
     }
+
+#if defined (WITH_H3)
+    if (h3_resolution >= 0) {
+      p_http_h3(json_obj, "src");
+      p_http_h3(json_obj, "dst");
+    }
+#endif
 
     json_str = p_http_json_str(json_obj);
 

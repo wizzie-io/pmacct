@@ -242,6 +242,7 @@ static const struct _dictionary_line dictionary[] = {
   {"http_local_city", cfg_key_http_local_city},
   {"http_local_region", cfg_key_http_local_region},
   {"http_local_ip", cfg_key_http_local_ip},
+  {"http_h3_resolution", cfg_key_http_h3_resolution},
   {"http_cache_entries", cfg_key_print_cache_entries},
   {"http_max_writers", cfg_key_dump_max_writers},
   {"http_preprocess", cfg_key_sql_preprocess},

@@ -1037,6 +1037,18 @@ DESC:		Language of the names of http_geoip_city_file, as the database names it (
 		"en", "de", "fr", "ja", "pt-BR", "ru", "zh-CN"). Names missing in it are given in English.
 DEFAULT:	en
 
+KEY:		http_h3_resolution
+VALUES:		[ 0 - 15 ]
+DESC:		If pmacct is compiled with --enable-h3 (Uber's H3, https://h3geo.org), each end of the
+		flow with coordinates (src_host_coords, dst_host_coords in the aggregation method, or
+		http_local_coords) gets its H3 cells, as hexadecimal strings: 'h3_src'/'h3_dst' at this
+		resolution and, at fixed ones, 'h3_city_src'/'h3_city_dst' (5, about 250 km2),
+		'h3_region_src'/'h3_region_dst' (3, about 12,400 km2) and 'h3_country_src'/
+		'h3_country_dst' (2, about 87,000 km2). The fixed ones are hexagons, not administrative
+		boundaries. Coordinates 0, 0, what GeoIP gives to the addresses it doesn't know, get
+		no cells. Without --enable-h3 a warning is logged and the knob is ignored.
+DEFAULT:	none
+
 KEY:		http_local_networks
 DESC:		Comma separated list of networks (IPv4 or IPv6, ie. "192.168.102.0/24, fd00::/8") where
 		the probe is. GeoIP databases don't know private addresses, so for an address in these
