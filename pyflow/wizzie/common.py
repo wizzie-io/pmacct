@@ -1,4 +1,4 @@
-import logging, os, re, threading
+import ipaddress, logging, os, re, threading
 from wizzie.geoip import GEOIP_PRIMITIVES
 
 
@@ -22,7 +22,8 @@ class Configuration:
     # Keys that may legitimately be left unset: each one is validated together with the feature that needs it
     _OPTIONAL_KEYS = {"http_endpoint", "api_key", "pcap_interface", "pcap_savefile", "pmacctd_config_file", "pcap_filter",
                       "local_networks", "cache_entries", "geoipv2_file", "geoip_asn_file", "extra_config",
-                      "local_country", "local_asn", "local_as_org", "local_coords", "ipinfo_token"}
+                      "local_country", "local_asn", "local_as_org", "local_coords", "local_city", "local_region",
+                      "local_ip", "ipinfo_token"}
     # Keys an empty value disables instead of taking the default
     _EMPTY_DISABLES = {"history_roundoff", "timestamp_field", "event_source", "event_type", "override_prefix", "geoip_fields"}
     # Keys whose value is never written to the log
@@ -70,13 +71,17 @@ class Configuration:
             "http_multi_values": "131072",
             "cache_entries": None,
             "geoipv2_file": None,  # MaxMind database (.mmdb): enables the GeoIP fields
-            "geoip_fields": "country",  # GeoIP fields added with GEOIPV2_FILE: country, pocode, coords
+            "geoip_fields": "country",  # GeoIP fields added with GEOIPV2_FILE: country, pocode, coords, city (and region)
+            "geoip_lang": "es",  # language of the city and region names
             "geoip_asn_file": None,  # MaxMind GeoLite2-ASN database (.mmdb): enables the AS fields
             # where the probe is, for the addresses of LOCAL_NETWORKS (see localgeo.py): these, or ipinfo.io
             "local_country": None,  # ISO code, ie. ES
             "local_asn": None,  # AS number of the Internet access, ie. 3352
             "local_as_org": None,  # its organization
             "local_coords": None,  # "<latitude>,<longitude>"
+            "local_city": None,
+            "local_region": None,
+            "local_ip": None,  # public IP of the site: its city and region in GEOIPV2_FILE, for LOCAL_CITY/LOCAL_REGION unset
             "local_geo_lookup": "True",  # ask ipinfo.io for what the four above leave unset
             "ipinfo_token": None,  # ipinfo.io token, for more than its free allowance
             "geoipv2_wait": "120",  # seconds to wait at start for GEOIPV2_FILE and GEOIP_ASN_FILE
@@ -149,6 +154,11 @@ class Configuration:
         if self.config["local_coords"] and not re.fullmatch(r"\s*-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?\s*", self.config["local_coords"]):
             raise ConfigError(f"LOCAL_COORDS \"{self.config['local_coords']}\" is not valid, expected <latitude>,<longitude>")
         self.config["local_coords"] = self.config["local_coords"] and self.config["local_coords"].replace(" ", "")
+        if self.config["local_ip"]:
+            try:
+                ipaddress.ip_address(self.config["local_ip"])
+            except ValueError:
+                raise ConfigError(f"LOCAL_IP \"{self.config['local_ip']}\" is not an IP address")
         if self.config["geoipv2_check_seconds"] == "0":
             raise ConfigError("GEOIPV2_CHECK_SECONDS must be at least 1")
         for key in self.config:

@@ -6,11 +6,13 @@ opens GEOIP_ASN_FILE at every purge, so it needs nothing'''
 
 import os, time
 
-# primitives of each GEOIP_FIELDS value, both ends of the flow
+# pmacct primitives of each GEOIP_FIELDS value, both ends of the flow. pmacct has none for "city":
+# city and region are added by the http plugin itself (http_geoip_city_file)
 GEOIP_PRIMITIVES = {
     "country": ("src_host_country", "dst_host_country"),
     "pocode": ("src_host_pocode", "dst_host_pocode"),
     "coords": ("src_host_coords", "dst_host_coords"),
+    "city": (),
 }
 
 

@@ -143,10 +143,13 @@ class PmacctdConfig:
             lines.append(f"http_class_details[{p}]: true")
         if c["geoip_asn_file"]:
             lines.append(f"http_geoip_asn_file[{p}]: {c['geoip_asn_file']}")
+        if c["geoipv2_file"] and "city" in self.conf.items("geoip_fields"):
+            lines.append(f"http_geoip_city_file[{p}]: {c['geoipv2_file']}")
+            lines.append(f"http_geoip_lang[{p}]: {c['geoip_lang']}")
         local_geo = self.local_geo or {}
         if local_networks and local_geo:
             lines.append(f"http_local_networks[{p}]: {', '.join(local_networks)}")
-            for key in ("country", "asn", "as_org", "coords"):
+            for key in ("country", "asn", "as_org", "coords", "city", "region", "ip"):
                 if key in local_geo:
                     lines.append(f"http_local_{key}[{p}]: {local_geo[key]}")
 

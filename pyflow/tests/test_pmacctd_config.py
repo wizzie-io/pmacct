@@ -95,7 +95,7 @@ class PmacctdConfigTest(unittest.TestCase):
         self.assertNotIn("country", self.render(GEOIPV2_FILE="/geoip/db.mmdb", GEOIP_FIELDS="")["pmacctd.conf"].replace("geoipv2", ""))
         self.assertNotIn("country", self.render()["pmacctd.conf"])
         with self.assertRaises(ConfigError):
-            Configuration(dict(BASE, GEOIP_FIELDS="country, city"))
+            Configuration(dict(BASE, GEOIP_FIELDS="country, town"))
         conf = self.render(GEOIP_ASN_FILE="/geoip/asn.mmdb")["pmacctd.conf"]
         self.assertIn("http_geoip_asn_file[wdp]: /geoip/asn.mmdb\n", conf)
         self.assertNotIn("country", conf)
@@ -171,6 +171,25 @@ class PmacctdConfigTest(unittest.TestCase):
         self.assertEqual(values, {"country": "ES"})
         values, calls, _ = self.resolve(GEOIPV2_FILE="/g/city.mmdb")  # no LOCAL_NETWORKS
         self.assertEqual((values, calls), ({}, []))
+
+    def test_geoip_city(self):
+        conf = self.render(GEOIPV2_FILE="/g/city.mmdb", GEOIP_FIELDS="country,city")["pmacctd.conf"]
+        self.assertIn("http_geoip_city_file[wdp]: /g/city.mmdb\n", conf)
+        self.assertIn("http_geoip_lang[wdp]: es\n", conf)
+        self.assertIn(", src_host_country, dst_host_country\n", conf, "city adds no pmacct primitive")
+        self.assertNotIn("http_geoip_city", self.render(GEOIPV2_FILE="/g/city.mmdb")["pmacctd.conf"])
+
+    def test_local_geo_city(self):
+        geo = dict(LOCAL_NETWORKS="192.168.102.0/24", GEOIPV2_FILE="/g/city.mmdb", GEOIP_FIELDS="city")
+        values, calls, logs = self.resolve(**geo)
+        self.assertEqual(values, {"ip": "81.36.67.254"}, "city and region by the public IP, not by ipinfo.io's names")
+        self.assertIn("city of 81.36.67.254 in GEOIPV2_FILE", logs)
+        values, calls, _ = self.resolve(LOCAL_IP="81.36.0.1", **geo)
+        self.assertEqual((values, calls), ({"ip": "81.36.0.1"}, []))
+        values, calls, _ = self.resolve(LOCAL_CITY="Sevilla", LOCAL_REGION="Andalucía", **geo)
+        self.assertEqual((values, calls), ({"city": "Sevilla", "region": "Andalucía"}, []))
+        with self.assertRaises(ConfigError):
+            Configuration(dict(BASE, LOCAL_IP="router"))
 
     def test_local_geo_config_lines(self):
         conf = Configuration(dict(BASE, CONFIG_DIR=self.dir.name, **self.GEO))

@@ -1,9 +1,11 @@
 '''Where the probe is, for the addresses of LOCAL_NETWORKS, which no GeoIP database knows: the
-country, AS and coordinates the http plugin gives them (http_local_*). Out of LOCAL_COUNTRY,
-LOCAL_ASN, LOCAL_AS_ORG and LOCAL_COORDS and, for what they leave unset and LOCAL_GEO_LOOKUP
-allows, out of ipinfo.io, which locates the public IP address the probe goes out to Internet with'''
+country, AS, coordinates, city and region the http plugin gives them (http_local_*). Out of
+LOCAL_COUNTRY, LOCAL_ASN, LOCAL_AS_ORG, LOCAL_COORDS, LOCAL_CITY and LOCAL_REGION and, for what they
+leave unset and LOCAL_GEO_LOOKUP allows, out of ipinfo.io, which locates the public IP address the
+probe goes out to Internet with. City and region are not taken from ipinfo.io, whose names are in
+English: the plugin looks up that public IP (LOCAL_IP or ipinfo.io's) in GEOIPV2_FILE, in GEOIP_LANG'''
 
-import json, re, urllib.request
+import ipaddress, json, re, urllib.request
 
 IPINFO_URL = "https://ipinfo.io/json"
 IPINFO_TIMEOUT = 5  # seconds
@@ -18,8 +20,8 @@ def fetch_ipinfo(token=None) -> dict:
 
 
 def resolve(conf, fetch=fetch_ipinfo) -> dict:
-    '''{"country", "asn", "as_org", "coords"} with the values found, only for the GeoIP fields in
-    use; empty without LOCAL_NETWORKS or GeoIP databases'''
+    '''{"country", "asn", "as_org", "coords", "city", "region", "ip"} with the values found, only
+    for the GeoIP fields in use; empty without LOCAL_NETWORKS or GeoIP databases'''
     c, logger = conf.config, conf.logger
     if not conf.items("local_networks"):
         return {}
@@ -31,10 +33,17 @@ def resolve(conf, fetch=fetch_ipinfo) -> dict:
         wanted += ["asn", "as_org"]
     if "coords" in fields:
         wanted.append("coords")
+    if "city" in fields:
+        wanted += ["city", "region"]
 
     values = {key: c[f"local_{key}"] for key in wanted if c[f"local_{key}"]}
     sources = {key: f"LOCAL_{key.upper()}" for key in values}
-    missing = [key for key in wanted if key not in values and key != "as_org"]
+    # city and region missing: the plugin looks up the public IP of the site
+    if ("city" in wanted and "city" not in values) or ("region" in wanted and "region" not in values):
+        wanted.append("ip")
+        if c["local_ip"]:
+            values["ip"], sources["ip"] = c["local_ip"], "LOCAL_IP"
+    missing = [key for key in wanted if key not in values and key not in ("as_org", "city", "region")]
 
     if missing and conf.is_true("local_geo_lookup"):
         logger.info(f"asking {IPINFO_URL} where this probe is ({', '.join(missing)}); LOCAL_GEO_LOOKUP=False to avoid it")
@@ -55,6 +64,8 @@ def resolve(conf, fetch=fetch_ipinfo) -> dict:
     for key in wanted:
         if key in values:
             logger.info(f"local networks: {key} {values[key]} ({sources[key]})")
+        elif key in ("city", "region") and "ip" in values:
+            logger.info(f"local networks: {key} of {values['ip']} in GEOIPV2_FILE")
         elif key != "as_org":
             logger.warning(f"local networks: no {key} known, their {key} fields stay as GeoIP leaves them")
     return values
@@ -73,4 +84,8 @@ def from_ipinfo(info) -> dict:
             values["as_org"] = org.group(2)
     if isinstance(info.get("loc"), str) and re.fullmatch(r"-?\d+(\.\d+)?,-?\d+(\.\d+)?", info["loc"]):
         values["coords"] = info["loc"]
+    try:
+        values["ip"] = str(ipaddress.ip_address(info.get("ip") or ""))
+    except ValueError:
+        pass
     return values

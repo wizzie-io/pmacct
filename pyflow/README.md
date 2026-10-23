@@ -180,10 +180,17 @@ volumes:
 - Las IPs privadas no están en la base de datos: su país sale vacío (`""`). Las coordenadas de
   esas IPs salen como `0`/`0`, un punto real en el mapa, así que en un despliegue con redes
   locales conviene quedarse con `country` o filtrarlas en la analítica.
+- **Ciudad y región** (`city` en `GEOIP_FIELDS`): pmacct no tiene primitivas para ellas, así que
+  las añade el plugin http con la misma base de `GEOIPV2_FILE`: `city_ip_*` y `region_ip_*`
+  (primer nivel de subdivisión: en España, la comunidad autónoma), en `GEOIP_LANG`. GeoLite2
+  trae el español para muchas ciudades y regiones; DB-IP Lite solo en inglés. Es el dato menos
+  fiable de GeoIP: en muchas IPs falta o es la del nodo del operador o de la CDN.
 - **IPs locales**: con `LOCAL_NETWORKS`, las IPs de las redes locales reciben en los campos que
-  GeoIP deja vacíos los datos de la sede: país, AS de su salida a Internet y, con `coords`, sus
-  coordenadas. Se toman de `LOCAL_COUNTRY`, `LOCAL_ASN`, `LOCAL_AS_ORG` y `LOCAL_COORDS` y, para lo
-  que no esté definido, de ipinfo.io, que localiza la IP pública con la que sale la sonda. Lo que
+  GeoIP deja vacíos los datos de la sede: país, AS de su salida a Internet y, con `coords` y
+  `city`, sus coordenadas, ciudad y región. Se toman de `LOCAL_COUNTRY`, `LOCAL_ASN`, `LOCAL_AS_ORG`, `LOCAL_COORDS`,
+  `LOCAL_CITY` y `LOCAL_REGION` y, para lo que no esté definido, de ipinfo.io, que localiza la IP
+  pública con la que sale la sonda. La ciudad y la región no se toman de ipinfo.io sino de la base
+  de GeoIP para esa IP, para que vayan en el mismo idioma que las demás. Lo que
   se aplica queda en el log (`local networks: country ES (ipinfo.io)`). Si la sonda sale a
   Internet por una VPN o desde la nube, esa IP no es la de la sede: conviene definir las
   variables. La consulta revela a ipinfo.io la IP pública de la sede; `LOCAL_GEO_LOOKUP=False`
@@ -224,11 +231,14 @@ se definen; si se definen vacías, se desactiva lo que hacen.
 | `CLASS_SPLIT` | `True` | Añade `l7_protocol` y `application` a partir de `class` (ver *Mensajes publicados*). Solo con `class` en `AGGREGATE` |
 | `CLASS_DETAILS` | `True` | Añade `application_category` e `ip_owner` (ver *Mensajes publicados*). Solo con `class` en `AGGREGATE` |
 | `GEOIPV2_FILE` | `""` | Base de datos GeoIP (`.mmdb`, MaxMind GeoLite2/GeoIP2 o DB-IP) en un volumen. Activa los campos de `GEOIP_FIELDS`; ver *GeoIP* |
-| `GEOIP_FIELDS` | `country` | Con `GEOIPV2_FILE`, campos que se añaden a `AGGREGATE`, separados por comas: `country` (`country_ip_src`/`_dst`), `pocode` (código postal) y `coords` (`lat_ip_*`/`lon_ip_*`). Los dos últimos necesitan una base de datos City. *Vacía desactiva* (las primitivas se ponen a mano en `AGGREGATE`) |
+| `GEOIP_FIELDS` | `country` | Con `GEOIPV2_FILE`, campos de GeoIP separados por comas: `country` (`country_ip_src`/`_dst`), `pocode` (código postal), `coords` (`lat_ip_*`/`lon_ip_*`) y `city` (`city_ip_*` y `region_ip_*`, la ciudad y la región o comunidad autónoma, que añade el plugin http porque pmacct no tiene primitivas para ellas). `pocode`, `coords` y `city` necesitan una base de datos City. *Vacía desactiva* (las primitivas se ponen a mano en `AGGREGATE`) |
+| `GEOIP_LANG` | `es` | Idioma de los nombres de ciudad y región (`es`, `en`, `de`, `fr`, `pt-BR`…). Si la base no tiene el nombre en ese idioma, va en inglés |
 | `GEOIP_ASN_FILE` | `""` | Base de datos GeoLite2-ASN (`.mmdb`) en un volumen. Añade `asn_ip_src`/`asn_ip_dst` (número de AS) y `as_org_ip_src`/`as_org_ip_dst` (organización). Necesita `src_host` y `dst_host` en `AGGREGATE`; ver *GeoIP* |
 | `LOCAL_COUNTRY` | `""` | Con `LOCAL_NETWORKS`, país (código ISO, p. ej. `ES`) que se da a las IPs locales, que no están en la base de GeoIP. Sin definir, se pregunta a ipinfo.io (`LOCAL_GEO_LOOKUP`); ver *GeoIP* |
 | `LOCAL_ASN` | `""` | Igual, el AS de la salida a Internet de la sede (p. ej. `3352`), para `asn_ip_*` de las IPs locales. Solo con `GEOIP_ASN_FILE` |
 | `LOCAL_AS_ORG` | `""` | Igual, la organización de ese AS (p. ej. `TELEFONICA DE ESPANA S.A.U.`) |
+| `LOCAL_CITY`, `LOCAL_REGION` | `""` | Igual, ciudad y región de la sede, con `city` en `GEOIP_FIELDS`. Sin definir, son las que la base de `GEOIPV2_FILE` da a la IP pública de la sede, en `GEOIP_LANG` (no se toman de ipinfo.io, que las da en inglés) |
+| `LOCAL_IP` | `""` | IP pública de la sede para lo anterior. Sin definir, la que da ipinfo.io |
 | `LOCAL_COORDS` | `""` | Igual, las coordenadas de la sede como `<latitud>,<longitud>`. Solo con `coords` en `GEOIP_FIELDS` |
 | `LOCAL_GEO_LOOKUP` | `True` | Pregunta a `https://ipinfo.io/json` al arrancar lo que las cuatro anteriores no definen. `False` para no consultar a un tercero |
 | `IPINFO_TOKEN` | `""` | Token de ipinfo.io, por si se supera su uso gratuito (unas 50.000 consultas al mes; pyflow hace una al arrancar) |
