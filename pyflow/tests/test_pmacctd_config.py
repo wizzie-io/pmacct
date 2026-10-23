@@ -6,6 +6,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from wizzie.common import Configuration, ConfigError
 from wizzie.pmacctd import PmacctdConfig
 from wizzie.geoip import GeoipFile
+from wizzie import localgeo
 
 BASE = {"HTTP_ENDPOINT": "http://192.168.102.9:8880", "API_KEY": "secret", "PCAP_INTERFACE": "eth0", "LOG_LEVEL": "ERROR"}
 
@@ -119,6 +120,69 @@ class PmacctdConfigTest(unittest.TestCase):
         self.assertFalse(geoip.changed(), "not checked again before GEOIPV2_CHECK_SECONDS")
         geoip.next_check = 0
         self.assertTrue(geoip.changed())
+
+    IPINFO = {"ip": "81.36.67.254", "country": "ES", "loc": "37.3446,-6.0639", "org": "AS3352 TELEFONICA DE ESPANA S.A.U."}
+    GEO = dict(LOCAL_NETWORKS="192.168.102.0/24", GEOIPV2_FILE="/g/city.mmdb", GEOIP_ASN_FILE="/g/asn.mmdb",
+               GEOIP_FIELDS="country,coords")
+
+    def resolve(self, fetch=None, **env):
+        conf = Configuration(dict(BASE, CONFIG_DIR=self.dir.name, **env))
+        calls = []
+
+        def fake(token):
+            calls.append(token)
+            if isinstance(fetch, Exception):
+                raise fetch
+            return fetch or self.IPINFO
+        with self.assertLogs(conf.logger, "INFO") as logs:
+            values = localgeo.resolve(conf, fake)
+            conf.logger.info("end")
+        return values, calls, "\n".join(logs.output)
+
+    def test_local_geo_ipinfo(self):
+        values, calls, _ = self.resolve(**self.GEO)
+        self.assertEqual(values, {"country": "ES", "asn": "3352", "as_org": "TELEFONICA DE ESPANA S.A.U.", "coords": "37.3446,-6.0639"})
+        self.assertEqual(calls, [None])
+
+    def test_local_geo_env_wins(self):
+        values, calls, logs = self.resolve(LOCAL_COUNTRY="pt", LOCAL_ASN="AS12345", IPINFO_TOKEN="tok", **self.GEO)
+        self.assertEqual(values["country"], "PT")
+        self.assertEqual(values["asn"], "12345")
+        self.assertNotIn("as_org", values, "the organization of ipinfo.io does not go with another AS")
+        self.assertEqual(values["coords"], "37.3446,-6.0639")
+        self.assertEqual(calls, ["tok"])
+        self.assertNotIn("tok", logs)
+
+    def test_local_geo_all_env_no_lookup(self):
+        values, calls, _ = self.resolve(LOCAL_COUNTRY="ES", LOCAL_ASN="3352", LOCAL_COORDS="37.3, -6.06", **self.GEO)
+        self.assertEqual(calls, [])
+        self.assertEqual(values["coords"], "37.3,-6.06")
+
+    def test_local_geo_lookup_off_or_failing(self):
+        values, calls, logs = self.resolve(LOCAL_GEO_LOOKUP="False", **self.GEO)
+        self.assertEqual((values, calls), ({}, []))
+        self.assertIn("no country known", logs)
+        values, calls, logs = self.resolve(fetch=OSError("no route"), **self.GEO)
+        self.assertEqual(values, {})
+        self.assertIn("could not be asked (no route)", logs)
+
+    def test_local_geo_only_fields_in_use(self):
+        values, calls, _ = self.resolve(LOCAL_NETWORKS="10.0.0.0/8", GEOIPV2_FILE="/g/city.mmdb")
+        self.assertEqual(values, {"country": "ES"})
+        values, calls, _ = self.resolve(GEOIPV2_FILE="/g/city.mmdb")  # no LOCAL_NETWORKS
+        self.assertEqual((values, calls), ({}, []))
+
+    def test_local_geo_config_lines(self):
+        conf = Configuration(dict(BASE, CONFIG_DIR=self.dir.name, **self.GEO))
+        lines = PmacctdConfig(conf, local_geo={"country": "ES", "asn": "3352", "as_org": "TELEFONICA"}).render()
+        lines = lines[os.path.join(self.dir.name, "pmacctd.conf")].splitlines()
+        self.assertIn("http_local_networks[wdp]: 192.168.102.0/24", lines)
+        self.assertIn("http_local_country[wdp]: ES", lines)
+        self.assertIn("http_local_as_org[wdp]: TELEFONICA", lines)
+        self.assertNotIn("http_local_coords", "\n".join(lines))
+        self.assertNotIn("http_local", self.render(**self.GEO)["pmacctd.conf"])  # nothing known, nothing written
+        with self.assertRaises(ConfigError):
+            Configuration(dict(BASE, LOCAL_COORDS="here"))
 
     def test_required(self):
         for var in ("HTTP_ENDPOINT", "API_KEY", "PCAP_INTERFACE"):

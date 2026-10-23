@@ -180,6 +180,15 @@ volumes:
 - Las IPs privadas no están en la base de datos: su país sale vacío (`""`). Las coordenadas de
   esas IPs salen como `0`/`0`, un punto real en el mapa, así que en un despliegue con redes
   locales conviene quedarse con `country` o filtrarlas en la analítica.
+- **IPs locales**: con `LOCAL_NETWORKS`, las IPs de las redes locales reciben en los campos que
+  GeoIP deja vacíos los datos de la sede: país, AS de su salida a Internet y, con `coords`, sus
+  coordenadas. Se toman de `LOCAL_COUNTRY`, `LOCAL_ASN`, `LOCAL_AS_ORG` y `LOCAL_COORDS` y, para lo
+  que no esté definido, de ipinfo.io, que localiza la IP pública con la que sale la sonda. Lo que
+  se aplica queda en el log (`local networks: country ES (ipinfo.io)`). Si la sonda sale a
+  Internet por una VPN o desde la nube, esa IP no es la de la sede: conviene definir las
+  variables. La consulta revela a ipinfo.io la IP pública de la sede; `LOCAL_GEO_LOOKUP=False`
+  la evita. Las IPs que no son locales ni están en la base (multicast, broadcast) se quedan sin
+  datos.
 - Sin cuenta de MaxMind, [DB-IP Lite](https://db-ip.com/db/lite.php) ofrece bases Country y City
   en el mismo formato, con licencia CC BY 4.0 (exige atribución) y actualización mensual.
 
@@ -217,6 +226,12 @@ se definen; si se definen vacías, se desactiva lo que hacen.
 | `GEOIPV2_FILE` | `""` | Base de datos GeoIP (`.mmdb`, MaxMind GeoLite2/GeoIP2 o DB-IP) en un volumen. Activa los campos de `GEOIP_FIELDS`; ver *GeoIP* |
 | `GEOIP_FIELDS` | `country` | Con `GEOIPV2_FILE`, campos que se añaden a `AGGREGATE`, separados por comas: `country` (`country_ip_src`/`_dst`), `pocode` (código postal) y `coords` (`lat_ip_*`/`lon_ip_*`). Los dos últimos necesitan una base de datos City. *Vacía desactiva* (las primitivas se ponen a mano en `AGGREGATE`) |
 | `GEOIP_ASN_FILE` | `""` | Base de datos GeoLite2-ASN (`.mmdb`) en un volumen. Añade `asn_ip_src`/`asn_ip_dst` (número de AS) y `as_org_ip_src`/`as_org_ip_dst` (organización). Necesita `src_host` y `dst_host` en `AGGREGATE`; ver *GeoIP* |
+| `LOCAL_COUNTRY` | `""` | Con `LOCAL_NETWORKS`, país (código ISO, p. ej. `ES`) que se da a las IPs locales, que no están en la base de GeoIP. Sin definir, se pregunta a ipinfo.io (`LOCAL_GEO_LOOKUP`); ver *GeoIP* |
+| `LOCAL_ASN` | `""` | Igual, el AS de la salida a Internet de la sede (p. ej. `3352`), para `asn_ip_*` de las IPs locales. Solo con `GEOIP_ASN_FILE` |
+| `LOCAL_AS_ORG` | `""` | Igual, la organización de ese AS (p. ej. `TELEFONICA DE ESPANA S.A.U.`) |
+| `LOCAL_COORDS` | `""` | Igual, las coordenadas de la sede como `<latitud>,<longitud>`. Solo con `coords` en `GEOIP_FIELDS` |
+| `LOCAL_GEO_LOOKUP` | `True` | Pregunta a `https://ipinfo.io/json` al arrancar lo que las cuatro anteriores no definen. `False` para no consultar a un tercero |
+| `IPINFO_TOKEN` | `""` | Token de ipinfo.io, por si se supera su uso gratuito (unas 50.000 consultas al mes; pyflow hace una al arrancar) |
 | `GEOIPV2_WAIT` | `120` | Segundos que se espera al arrancar a que existan `GEOIPV2_FILE` y `GEOIP_ASN_FILE`. Pasado ese tiempo pmacctd arranca igual, con los campos de GeoIP vacíos, y carga la base de datos en cuanto aparece |
 | `GEOIPV2_CHECK_SECONDS` | `60` | Cada cuántos segundos se comprueba si `GEOIPV2_FILE` ha cambiado. Si cambia, pmacctd la vuelve a cargar sin reiniciarse |
 | `HTTP_TIMEOUT` | `10` | Segundos máximos de cada envío |

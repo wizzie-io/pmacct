@@ -3,6 +3,7 @@
 import ipaddress, os, re, signal, socket, subprocess
 from urllib.parse import urlsplit
 from wizzie.geoip import GEOIP_PRIMITIVES
+from wizzie import localgeo
 
 PLUGIN = "wdp"  # plugin instance name, shows in the logs and in writer_id
 # pmacctd.conf line that holds the API key, as it is written to the log
@@ -13,8 +14,9 @@ class PmacctdConfig:
     '''pmacctd.conf and, depending on the settings, pretag.map (direction out of LOCAL_NETWORKS),
     networks.lst (NET_FIELDS) and pcap_interfaces.map (several interfaces)'''
 
-    def __init__(self, conf):
+    def __init__(self, conf, local_geo=None):
         self.conf = conf
+        self.local_geo = local_geo  # see localgeo.resolve(); None: resolved when the files are written
         self.logger = conf.logger
         config_dir = conf.config["config_dir"]
         self.conf_file = os.path.join(config_dir, "pmacctd.conf")
@@ -24,6 +26,8 @@ class PmacctdConfig:
 
     def write(self) -> str:
         '''Writes the files and returns the path of pmacctd.conf'''
+        if self.local_geo is None:
+            self.local_geo = localgeo.resolve(self.conf)
         files = self.render()
         os.makedirs(self.conf.config["config_dir"], exist_ok=True)
         for path, content in files.items():
@@ -139,6 +143,12 @@ class PmacctdConfig:
             lines.append(f"http_class_details[{p}]: true")
         if c["geoip_asn_file"]:
             lines.append(f"http_geoip_asn_file[{p}]: {c['geoip_asn_file']}")
+        local_geo = self.local_geo or {}
+        if local_networks and local_geo:
+            lines.append(f"http_local_networks[{p}]: {', '.join(local_networks)}")
+            for key in ("country", "asn", "as_org", "coords"):
+                if key in local_geo:
+                    lines.append(f"http_local_{key}[{p}]: {local_geo[key]}")
 
         if c["extra_config"]:
             lines += ["! EXTRA_CONFIG", c["extra_config"]]
