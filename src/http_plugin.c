@@ -581,6 +581,29 @@ void http_cache_purge(struct chained_cache *queue[], int index, int safe_action)
       }
     }
 
+    /* nDPI "class": "<master>/<app>", ie. "QUIC/YouTube", split in two fields;
+       with no master ("Unknown/DNS") the protocol is the app one */
+    if (config.http_class_split) {
+      json_t *class = json_object_get(json_obj, "class");
+
+      if (json_is_string(class)) {
+        const char *str = json_string_value(class), *app = strchr(str, '/');
+        char master[SRVBUFLEN];
+
+        if (app) {
+          snprintf(master, sizeof(master), "%.*s", (int) (app - str), str);
+          app++;
+        }
+        else {
+          master[0] = '\0';
+          app = str;
+        }
+
+        p_http_override(json_obj, "l7_protocol", json_string((master[0] && strcasecmp(master, "Unknown")) ? master : app));
+        p_http_override(json_obj, "application", json_string(app));
+      }
+    }
+
     json_str = compose_json_str(json_obj);
 
     if (json_str) {

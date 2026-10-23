@@ -22,7 +22,7 @@ Cada `REFRESH_TIME` segundos se publica un mensaje por cada combinación de los 
 
 ```json
 {
-  "event_type": "pmacct_flow", "class": "TLS/Github",
+  "event_type": "pmacct_flow", "class": "TLS/Github", "l7_protocol": "TLS", "application": "Github",
   "mac_src": "14:98:77:39:28:b5", "mac_dst": "8c:ed:e1:14:74:4c", "vlan": 0, "etype": "800",
   "ip_src": "192.168.102.9", "ip_dst": "20.250.119.67", "port_src": 63979, "port_dst": 443,
   "tcp_flags": "24", "ip_proto": "tcp", "tos": 2,
@@ -37,8 +37,14 @@ Cada `REFRESH_TIME` segundos se publica un mensaje por cada combinación de los 
   es la hora a la que se envió.
 - `event_type` / `event_source`: los campos comunes de los conectores de Wizzie. El valor que
   pone pmacct en `event_type` (`purge`) se conserva en `pmacct_event_type`.
-- `class`: aplicación detectada por nDPI, como `<protocolo maestro>/<aplicación>`. Los primeros
-  paquetes de un flujo, antes de que nDPI lo identifique, salen como `Unknown/Unknown`.
+- `class`: clasificación de nDPI, como `<protocolo maestro>/<protocolo de aplicación>`. El
+  maestro es lo que transporta la aplicación (TLS, QUIC, DNS…) y es `Unknown` cuando nDPI solo
+  reconoce un nivel: `QUIC/YouTube` es YouTube sobre QUIC, `Unknown/QUIC` es QUIC sin aplicación
+  identificada y `DNS/Facebook` son consultas DNS de dominios de Facebook. Los primeros paquetes
+  de un flujo, antes de que nDPI lo identifique, salen como `Unknown/Unknown`.
+- `l7_protocol` / `application`: `class` separada en dos campos (`CLASS_SPLIT`), para agrupar
+  sin partir la cadena. `l7_protocol` es el maestro o, si es `Unknown`, el de aplicación;
+  `application` es el de aplicación. `Unknown/QUIC` da `QUIC` en los dos.
 - `direction`: solo con `LOCAL_NETWORKS`. `out` (sale de las redes locales, subida), `in`
   (entra, bajada) o `local` (entre redes locales, o hacia multicast/broadcast).
 - La conversación en cada sentido es un mensaje distinto, como en NetFlow/IPFIX.
@@ -131,13 +137,14 @@ se definen; si se definen vacías, se desactiva lo que hacen.
 | `TIMESTAMP_FIELD` | `timestamp` | Campo con el inicio del intervalo en segundos Unix. *Vacía desactiva* |
 | `EVENT_SOURCE` | `pmacct` | Valor del campo `event_source`. *Vacía desactiva* |
 | `EVENT_TYPE` | `pmacct_flow` | Valor del campo `event_type`, en lugar de `purge`. *Vacía desactiva* |
-| `OVERRIDE_PREFIX` | `pmacct_` | Prefijo con el que se conserva un campo que se sustituye (`event_type` → `pmacct_event_type`). *Vacía desactiva* |
+| `OVERRIDE_PREFIX` | `pmacct_` | Prefijo con el que se conserva un campo que se sustituye (`event_type` → `pmacct_event_type`; también `l7_protocol` y `application` si ya venían). *Vacía desactiva* |
 | `LOCAL_NETWORKS` | `""` | Redes locales separadas por comas (IPv4 o IPv6), p. ej. `192.168.102.0/24,10.0.0.0/8`. Activa el campo `direction` |
 | `LOCAL_MULTICAST` | `True` | Con `LOCAL_NETWORKS`, cuenta como `local` el tráfico hacia multicast y broadcast y el IPv6 link-local |
 | `NET_FIELDS` | `False` | Con `LOCAL_NETWORKS`, añade `net_src` y `net_dst`: la red local de cada extremo, o `0.0.0.0` si es externo |
 | `CLASSIFIER_NUM_ROOTS` | `512` | nDPI: buckets de la tabla hash de flujos. Más buckets, más memoria al arrancar y búsquedas más rápidas |
 | `CLASSIFIER_MAX_FLOWS` | `200000` | nDPI: máximo de flujos simultáneos en seguimiento (pmacct, sin definir, permite 200 millones) |
 | `CLASSIFIER_PROTO_GUESS` | `True` | nDPI: si no identifica un flujo, intenta deducir la aplicación por puertos y protocolo |
+| `CLASS_SPLIT` | `True` | Añade `l7_protocol` y `application` a partir de `class` (ver *Mensajes publicados*). Solo con `class` en `AGGREGATE` |
 | `GEOIPV2_FILE` | `""` | Base de datos MaxMind (`.mmdb`) montada en el contenedor, para usar `src_host_country`, `dst_host_country` y similares en `AGGREGATE` |
 | `HTTP_TIMEOUT` | `10` | Segundos máximos de cada envío |
 | `HTTP_RETRIES` | `3` | Intentos por envío. Se reintentan errores de red, 5xx, 408 y 429; el resto de 4xx (p. ej. API key rechazada) no |

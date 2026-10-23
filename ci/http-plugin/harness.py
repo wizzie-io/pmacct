@@ -267,6 +267,24 @@ def case_label_flatten(binary, workdir):
         ep.stop()
 
 
+def case_class_split(binary, workdir):
+    '''http_class_split adds l7_protocol and application out of class; without nDPI the class
+    ("unknown") has no '/' and goes to both as it is'''
+    ep = Endpoint(200)
+    try:
+        log = run_flows(binary, workdir, ep, 2, "http_apikey[t]: %s" % APIKEY,
+                        "http_class_split[t]: true", aggregate=AGGREGATE + ", class")
+        msgs = ep.messages()
+        check(len(msgs) == 2, "2 messages received, got %d" % len(msgs))
+        for m in msgs:
+            check("class" in m, "class is kept")
+            check(m.get("l7_protocol") == m["class"] and m.get("application") == m["class"],
+                  "l7_protocol and application are the class with no '/', got %r" % m)
+        check(not re.search(r"WARN|ERROR", log), "no WARN/ERROR in the log")
+    finally:
+        ep.stop()
+
+
 def case_retry_5xx(binary, workdir):
     '''5xx is retried http_retries times, then the batch is dropped with an ERROR'''
     ep = Endpoint(500)
