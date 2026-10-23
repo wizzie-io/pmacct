@@ -1,6 +1,7 @@
 import signal, sys
 from wizzie.common import Configuration, ConfigError
 from wizzie.pmacctd import PmacctdConfig, Pmacctd
+from wizzie.geoip import GeoipFile
 
 if __name__ == "__main__":
     try:
@@ -21,6 +22,14 @@ if __name__ == "__main__":
     else:
         conf_file = PmacctdConfig(conf).write()
 
+    # the GeoIP databases are usually written by another container: wait for them, then follow the updates
+    geoip = None
+    if (conf.config["geoipv2_file"] or conf.config["geoip_asn_file"]) and not conf.config["pmacctd_config_file"]:
+        geoip = GeoipFile(conf)
+        geoip.wait()
+        if conf.exit_event.is_set():
+            sys.exit(0)
+
     pmacctd = Pmacctd(conf, conf_file)
     pmacctd.start()
 
@@ -31,6 +40,9 @@ if __name__ == "__main__":
         if code is not None:
             (logger.info if code == 0 else logger.error)(f"pmacctd exited with code {code}")
             sys.exit(code)
+        if geoip and geoip.changed():
+            logger.info(f"new version of GEOIPV2_FILE {geoip.path}: pmacctd loads it again")
+            pmacctd.reload_maps()
 
     logger.info("Stopping pmacctd")
     code = pmacctd.stop()

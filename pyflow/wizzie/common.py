@@ -1,4 +1,5 @@
 import logging, os, threading
+from wizzie.geoip import GEOIP_PRIMITIVES
 
 
 def str2bool(v):
@@ -20,9 +21,9 @@ class Configuration:
 
     # Keys that may legitimately be left unset: each one is validated together with the feature that needs it
     _OPTIONAL_KEYS = {"http_endpoint", "api_key", "pcap_interface", "pcap_savefile", "pmacctd_config_file", "pcap_filter",
-                      "local_networks", "cache_entries", "geoipv2_file", "extra_config"}
+                      "local_networks", "cache_entries", "geoipv2_file", "geoip_asn_file", "extra_config"}
     # Keys an empty value disables instead of taking the default
-    _EMPTY_DISABLES = {"history_roundoff", "timestamp_field", "event_source", "event_type", "override_prefix"}
+    _EMPTY_DISABLES = {"history_roundoff", "timestamp_field", "event_source", "event_type", "override_prefix", "geoip_fields"}
     # Keys whose value is never written to the log
     _SECRET_KEYS = {"api_key"}
 
@@ -67,7 +68,11 @@ class Configuration:
             "http_retries": "3",
             "http_multi_values": "131072",
             "cache_entries": None,
-            "geoipv2_file": None,
+            "geoipv2_file": None,  # MaxMind database (.mmdb): enables the GeoIP fields
+            "geoip_fields": "country",  # GeoIP fields added with GEOIPV2_FILE: country, pocode, coords
+            "geoip_asn_file": None,  # MaxMind GeoLite2-ASN database (.mmdb): enables the AS fields
+            "geoipv2_wait": "120",  # seconds to wait at start for GEOIPV2_FILE and GEOIP_ASN_FILE
+            "geoipv2_check_seconds": "60",  # how often GEOIPV2_FILE is checked for a new version
             "debug": "False",  # pmacctd debug log
             "extra_config": None,  # pmacctd configuration lines appended at the end
         }
@@ -121,9 +126,14 @@ class Configuration:
         if not (self.config["pcap_interface"] or self.config["pcap_savefile"]):
             raise ConfigError("ENV var PCAP_INTERFACE must be set")
         for key in ("snaplen", "refresh_time", "classifier_num_roots", "classifier_max_flows", "http_timeout", "http_retries",
-                    "http_multi_values", "cache_entries"):
+                    "http_multi_values", "cache_entries", "geoipv2_wait", "geoipv2_check_seconds"):
             if self.config[key] is not None and not self.config[key].isdigit():
                 raise ConfigError(f"{self.env_map[key]} \"{self.config[key]}\" is not valid, expected an integer")
+        unknown = set(self.items("geoip_fields")) - set(GEOIP_PRIMITIVES)
+        if unknown:
+            raise ConfigError(f"GEOIP_FIELDS \"{self.config['geoip_fields']}\" is not valid, expected some of {', '.join(GEOIP_PRIMITIVES)}")
+        if self.config["geoipv2_check_seconds"] == "0":
+            raise ConfigError("GEOIPV2_CHECK_SECONDS must be at least 1")
         for key in self.config:
             value = "***" if key in self._SECRET_KEYS else self.config[key]
             self.logger.debug(f"Configuration for {self.env_map[key]} is {value}")

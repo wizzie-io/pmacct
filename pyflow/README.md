@@ -132,6 +132,57 @@ entregados de `m`. Es normal que `n` sea algo menor que `m`, porque lo que llega
 cambio de minuto se envía en la purga siguiente. Si una entrega falla, se reintenta y después
 se descarta con un `ERROR` en el log.
 
+### GeoIP
+
+Con `GEOIPV2_FILE`, cada mensaje lleva el país (y, según `GEOIP_FIELDS`, el código postal y las
+coordenadas) de las dos IPs del flujo; con `GEOIP_ASN_FILE`, su sistema autónomo (número y
+organización, p. ej. `15169` / `Google LLC`). GeoLite2-City incluye todo lo de GeoLite2-Country,
+así que basta con City y ASN. La base de datos no va en la imagen: GeoLite2 es gratuita
+pero su licencia no permite redistribuirla, así que cada despliegue la descarga con su propia
+cuenta de MaxMind mediante el contenedor oficial `geoipupdate`, en un volumen compartido:
+
+```yaml
+services:
+  geoipupdate:
+    image: ghcr.io/maxmind/geoipupdate
+    restart: unless-stopped
+    environment:
+      GEOIPUPDATE_ACCOUNT_ID: <id de cuenta de MaxMind>
+      GEOIPUPDATE_LICENSE_KEY: <clave de licencia>
+      GEOIPUPDATE_EDITION_IDS: GeoLite2-City GeoLite2-ASN
+      GEOIPUPDATE_FREQUENCY: 72                   # horas; sin ella se ejecuta una vez y sale
+    volumes:
+      - geoip:/usr/share/GeoIP
+
+  pmacctd:
+    # ... como en Ejecución, más:
+    volumes:
+      - geoip:/geoip:ro
+    environment:
+      GEOIPV2_FILE: /geoip/GeoLite2-City.mmdb
+      GEOIP_ASN_FILE: /geoip/GeoLite2-ASN.mmdb
+
+volumes:
+  geoip:
+```
+
+- Al arrancar, pyflow espera hasta `GEOIPV2_WAIT` segundos a que `geoipupdate` haya descargado
+  la base de datos. Si no llega, pmacctd arranca sin ella (un `WARN` en el log y los campos de
+  país vacíos) y la carga en cuanto aparece.
+- Cada vez que `geoipupdate` deja una versión nueva de `GEOIPV2_FILE`, pyflow se lo indica a
+  pmacctd (`SIGUSR2`) y la carga sin cortar la captura. En el log: `new version of GEOIPV2_FILE
+  ...` y `geoipv2_file database ... loaded`. `GEOIP_ASN_FILE` lo abre el plugin http en cada
+  envío, así que una versión nueva se usa sin más.
+- Los campos de AS no los da pmacct (sus primitivas `src_as`/`dst_as` solo se rellenan desde BGP
+  o `networks_file`): los añade el plugin http (`http_geoip_asn_file`) al componer cada mensaje,
+  a partir de las IPs del flujo. Las direcciones que no están en la base de datos, como las
+  privadas, no llevan estos campos.
+- Las IPs privadas no están en la base de datos: su país sale vacío (`""`). Las coordenadas de
+  esas IPs salen como `0`/`0`, un punto real en el mapa, así que en un despliegue con redes
+  locales conviene quedarse con `country` o filtrarlas en la analítica.
+- Sin cuenta de MaxMind, [DB-IP Lite](https://db-ip.com/db/lite.php) ofrece bases Country y City
+  en el mismo formato, con licencia CC BY 4.0 (exige atribución) y actualización mensual.
+
 ### Variables de entorno
 
 Las variables marcadas con *vacía desactiva* tienen un valor por defecto que se aplica si no
@@ -163,7 +214,11 @@ se definen; si se definen vacías, se desactiva lo que hacen.
 | `CLASSIFIER_PROTO_GUESS` | `True` | nDPI: si no identifica un flujo, intenta deducir la aplicación por puertos y protocolo |
 | `CLASS_SPLIT` | `True` | Añade `l7_protocol` y `application` a partir de `class` (ver *Mensajes publicados*). Solo con `class` en `AGGREGATE` |
 | `CLASS_DETAILS` | `True` | Añade `application_category` e `ip_owner` (ver *Mensajes publicados*). Solo con `class` en `AGGREGATE` |
-| `GEOIPV2_FILE` | `""` | Base de datos MaxMind (`.mmdb`) montada en el contenedor, para usar `src_host_country`, `dst_host_country` y similares en `AGGREGATE` |
+| `GEOIPV2_FILE` | `""` | Base de datos GeoIP (`.mmdb`, MaxMind GeoLite2/GeoIP2 o DB-IP) en un volumen. Activa los campos de `GEOIP_FIELDS`; ver *GeoIP* |
+| `GEOIP_FIELDS` | `country` | Con `GEOIPV2_FILE`, campos que se añaden a `AGGREGATE`, separados por comas: `country` (`country_ip_src`/`_dst`), `pocode` (código postal) y `coords` (`lat_ip_*`/`lon_ip_*`). Los dos últimos necesitan una base de datos City. *Vacía desactiva* (las primitivas se ponen a mano en `AGGREGATE`) |
+| `GEOIP_ASN_FILE` | `""` | Base de datos GeoLite2-ASN (`.mmdb`) en un volumen. Añade `asn_ip_src`/`asn_ip_dst` (número de AS) y `as_org_ip_src`/`as_org_ip_dst` (organización). Necesita `src_host` y `dst_host` en `AGGREGATE`; ver *GeoIP* |
+| `GEOIPV2_WAIT` | `120` | Segundos que se espera al arrancar a que existan `GEOIPV2_FILE` y `GEOIP_ASN_FILE`. Pasado ese tiempo pmacctd arranca igual, con los campos de GeoIP vacíos, y carga la base de datos en cuanto aparece |
+| `GEOIPV2_CHECK_SECONDS` | `60` | Cada cuántos segundos se comprueba si `GEOIPV2_FILE` ha cambiado. Si cambia, pmacctd la vuelve a cargar sin reiniciarse |
 | `HTTP_TIMEOUT` | `10` | Segundos máximos de cada envío |
 | `HTTP_RETRIES` | `3` | Intentos por envío. Se reintentan errores de red, 5xx, 408 y 429; el resto de 4xx (p. ej. API key rechazada) no |
 | `HTTP_MULTI_VALUES` | `131072` | Bytes máximos de cada envío; los mensajes de un intervalo se reparten en tantos envíos como haga falta |

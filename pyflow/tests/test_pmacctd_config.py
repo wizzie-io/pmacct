@@ -1,10 +1,11 @@
 '''Configuration files pyflow writes for pmacctd. Run from pyflow/: python3 -m unittest discover tests'''
 
-import os, sys, tempfile, unittest
+import os, sys, tempfile, time, unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from wizzie.common import Configuration, ConfigError
 from wizzie.pmacctd import PmacctdConfig
+from wizzie.geoip import GeoipFile
 
 BASE = {"HTTP_ENDPOINT": "http://192.168.102.9:8880", "API_KEY": "secret", "PCAP_INTERFACE": "eth0", "LOG_LEVEL": "ERROR"}
 
@@ -83,6 +84,41 @@ class PmacctdConfigTest(unittest.TestCase):
             PmacctdConfig(conf).write()
         self.assertNotIn("secret", "\n".join(logs.output))
         self.assertIn("http_apikey[wdp]: <API_KEY>", "\n".join(logs.output))
+
+    def test_geoip(self):
+        conf = self.render(GEOIPV2_FILE="/geoip/db.mmdb")["pmacctd.conf"]
+        self.assertIn("geoipv2_file: /geoip/db.mmdb\n", conf)
+        self.assertIn(", src_host_country, dst_host_country\n", conf)
+        conf = self.render(GEOIPV2_FILE="/geoip/db.mmdb", GEOIP_FIELDS="country, coords")["pmacctd.conf"]
+        self.assertIn(", src_host_country, dst_host_country, src_host_coords, dst_host_coords\n", conf)
+        self.assertNotIn("country", self.render(GEOIPV2_FILE="/geoip/db.mmdb", GEOIP_FIELDS="")["pmacctd.conf"].replace("geoipv2", ""))
+        self.assertNotIn("country", self.render()["pmacctd.conf"])
+        with self.assertRaises(ConfigError):
+            Configuration(dict(BASE, GEOIP_FIELDS="country, city"))
+        conf = self.render(GEOIP_ASN_FILE="/geoip/asn.mmdb")["pmacctd.conf"]
+        self.assertIn("http_geoip_asn_file[wdp]: /geoip/asn.mmdb\n", conf)
+        self.assertNotIn("country", conf)
+
+    def test_geoip_file_changes(self):
+        path = os.path.join(self.dir.name, "db.mmdb")
+        conf = Configuration(dict(BASE, GEOIPV2_FILE=path, GEOIPV2_WAIT="0", GEOIPV2_CHECK_SECONDS="1"))
+        geoip = GeoipFile(conf)
+        with self.assertLogs(conf.logger, "WARNING"):
+            geoip.wait()  # not there: pmacctd starts without it
+        self.assertFalse(geoip.changed())
+        with open(path + ".tmp", "w") as f:
+            f.write("v1")
+        os.rename(path + ".tmp", path)  # as geoipupdate does
+        geoip.next_check = 0
+        self.assertTrue(geoip.changed())
+        geoip.next_check = 0
+        self.assertFalse(geoip.changed(), "the same version is reported once")
+        with open(path + ".tmp", "w") as f:
+            f.write("v2, longer")
+        os.rename(path + ".tmp", path)
+        self.assertFalse(geoip.changed(), "not checked again before GEOIPV2_CHECK_SECONDS")
+        geoip.next_check = 0
+        self.assertTrue(geoip.changed())
 
     def test_required(self):
         for var in ("HTTP_ENDPOINT", "API_KEY", "PCAP_INTERFACE"):
