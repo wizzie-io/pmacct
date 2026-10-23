@@ -1022,6 +1022,36 @@ DESC:		Full pathname to a MaxMind GeoLite2-ASN (or GeoIP2-ISP) database, binary 
 		--enable-geoipv2 a warning is logged and the knob is ignored.
 DEFAULT:	none
 
+KEY:		http_local_networks
+DESC:		Comma separated list of networks (IPv4 or IPv6, ie. "192.168.102.0/24, fd00::/8") where
+		the probe is. GeoIP databases don't know private addresses, so for an address in these
+		networks the http plugin fills in the GeoIP fields left empty with where the probe is:
+		'country_ip_src'/'country_ip_dst' with http_local_country (only if the country
+		primitive is in the aggregation method and the field came out empty), 'asn_ip_*' and
+		'as_org_ip_*' with http_local_asn and http_local_as_org (if the message has none), and
+		'lat_ip_*'/'lon_ip_*' with http_local_coords (only if the coords primitive is in the
+		aggregation method and they came out as 0, 0). Up to 64 networks.
+DEFAULT:	none
+
+KEY:		http_local_country
+DESC:		Country, ISO code (ie. "ES"), of the addresses in http_local_networks.
+DEFAULT:	none
+
+KEY:		http_local_asn
+DESC:		AS number of the addresses in http_local_networks, usually the one of the Internet
+		access of the site (ie. 3352).
+DEFAULT:	none
+
+KEY:		http_local_as_org
+DESC:		AS organization of the addresses in http_local_networks (ie. "TELEFONICA DE ESPANA
+		S.A.U."). Only used along with http_local_asn.
+DEFAULT:	none
+
+KEY:		http_local_coords
+DESC:		Coordinates of the addresses in http_local_networks, as "<latitude>,<longitude>" (ie.
+		"37.3446,-6.0639").
+DEFAULT:	none
+
 KEY:            [ bgp_daemon_msglog_kafka_broker_host | bgp_table_dump_kafka_broker_host |
                   bmp_daemon_msglog_kafka_broker_host | bmp_dump_kafka_broker_host |
 		  sfacctd_counter_kafka_broker_host | telemetry_daemon_msglog_kafka_broker_host |

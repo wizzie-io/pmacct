@@ -198,6 +198,11 @@ struct configuration {
   int http_class_split;
   int http_class_details;
   char *http_geoip_asn_file;
+  char *http_local_networks;
+  char *http_local_country;
+  char *http_local_asn;
+  char *http_local_as_org;
+  char *http_local_coords;
   char *kafka_writer_id;
   int print_cache_entries;
   int print_markers;

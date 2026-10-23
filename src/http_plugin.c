@@ -37,6 +37,8 @@
 char default_http_topic[] = "pmacct.acct";
 char default_http_apikey_header[] = "apikey";
 
+static void p_http_local_init(void);
+
 /* Functions */
 void http_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 {
@@ -125,6 +127,8 @@ void http_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
     Log(LOG_WARNING, "WARN ( %s/%s ): 'http_geoip_asn_file' requires GeoIP support (--enable-geoipv2); ignored.\n", config.name, config.type);
   }
 #endif
+
+  p_http_local_init();
 
 #if !defined (WITH_NDPI)
   if (config.http_class_details) {
@@ -520,6 +524,127 @@ static void p_http_geoip_asn(json_t *obj, MMDB_s *db, struct host_addr *addr, co
 }
 #endif
 
+/* Where the probe is, for the addresses of the local networks, which no GeoIP
+   database knows: http_local_networks, http_local_country, http_local_asn,
+   http_local_as_org, http_local_coords */
+#define HTTP_LOCAL_NETWORKS_MAX 64
+
+struct p_http_local_net {
+  u_int8_t family;
+  u_int8_t masklen;
+  u_char addr[16];
+};
+
+static struct p_http_local_net local_nets[HTTP_LOCAL_NETWORKS_MAX];
+static int local_nets_num;
+static json_int_t local_asn;
+static double local_lat, local_lon;
+static int local_coords;
+
+/* parsed once in the plugin process; the purge writers inherit it */
+static void p_http_local_init(void)
+{
+  char *list, *tok, *saveptr = NULL;
+
+  if (!config.http_local_networks) return;
+
+  if (!(list = strdup(config.http_local_networks))) return;
+
+  for (tok = strtok_r(list, ", ", &saveptr); tok; tok = strtok_r(NULL, ", ", &saveptr)) {
+    struct p_http_local_net *net = &local_nets[local_nets_num];
+    char *slash = strchr(tok, '/');
+    int maxlen;
+
+    if (local_nets_num == HTTP_LOCAL_NETWORKS_MAX) {
+      Log(LOG_WARNING, "WARN ( %s/%s ): 'http_local_networks': more than %d networks, the rest are ignored.\n", config.name, config.type, HTTP_LOCAL_NETWORKS_MAX);
+      break;
+    }
+
+    if (slash) *slash = '\0';
+
+    if (inet_pton(AF_INET, tok, net->addr) == 1) net->family = AF_INET, maxlen = 32;
+    else if (inet_pton(AF_INET6, tok, net->addr) == 1) net->family = AF_INET6, maxlen = 128;
+    else {
+      Log(LOG_WARNING, "WARN ( %s/%s ): 'http_local_networks': '%s' is not a network, ignored.\n", config.name, config.type, tok);
+      continue;
+    }
+
+    net->masklen = slash ? atoi(slash + 1) : maxlen;
+    if (net->masklen > maxlen) net->masklen = maxlen;
+    local_nets_num++;
+  }
+
+  free(list);
+
+  if (config.http_local_asn) local_asn = strtoll(config.http_local_asn, NULL, 10);
+
+  if (config.http_local_coords) {
+    if (sscanf(config.http_local_coords, "%lf,%lf", &local_lat, &local_lon) == 2) local_coords = TRUE;
+    else Log(LOG_WARNING, "WARN ( %s/%s ): 'http_local_coords' is not '<latitude>,<longitude>', ignored.\n", config.name, config.type);
+  }
+}
+
+static int p_http_is_local(struct host_addr *addr)
+{
+  const u_char *bytes;
+  int idx, full, rest;
+
+  if (addr->family == AF_INET) bytes = (const u_char *) &addr->address.ipv4;
+  else if (addr->family == AF_INET6) bytes = (const u_char *) &addr->address.ipv6;
+  else return FALSE;
+
+  for (idx = 0; idx < local_nets_num; idx++) {
+    struct p_http_local_net *net = &local_nets[idx];
+
+    if (net->family != addr->family) continue;
+
+    full = net->masklen / 8;
+    rest = net->masklen % 8;
+
+    if (memcmp(bytes, net->addr, full)) continue;
+    if (rest && ((bytes[full] ^ net->addr[full]) & (0xff << (8 - rest)))) continue;
+
+    return TRUE;
+  }
+
+  return FALSE;
+}
+
+/* fills in, for a local address, the GeoIP fields left empty: country only if
+   the country primitive is there, AS and coordinates if configured */
+static void p_http_local_geo(json_t *obj, struct host_addr *addr, const char *end)
+{
+  char key[SRVBUFLEN], key2[SRVBUFLEN];
+  json_t *value, *value2;
+
+  if (!p_http_is_local(addr)) return;
+
+  snprintf(key, sizeof(key), "country_ip_%s", end);
+  value = json_object_get(obj, key);
+  if (config.http_local_country && json_is_string(value) && !strlen(json_string_value(value))) {
+    json_object_set_new(obj, key, json_string(config.http_local_country));
+  }
+
+  snprintf(key, sizeof(key), "asn_ip_%s", end);
+  if (local_asn && !json_object_get(obj, key)) {
+    json_object_set_new(obj, key, json_integer(local_asn));
+
+    snprintf(key, sizeof(key), "as_org_ip_%s", end);
+    if (config.http_local_as_org && !json_object_get(obj, key)) {
+      json_object_set_new(obj, key, json_string(config.http_local_as_org));
+    }
+  }
+
+  snprintf(key, sizeof(key), "lat_ip_%s", end);
+  snprintf(key2, sizeof(key2), "lon_ip_%s", end);
+  value = json_object_get(obj, key);
+  value2 = json_object_get(obj, key2);
+  if (local_coords && json_is_real(value) && json_is_real(value2) && !json_real_value(value) && !json_real_value(value2)) {
+    json_object_set_new(obj, key, json_real(local_lat));
+    json_object_set_new(obj, key2, json_real(local_lon));
+  }
+}
+
 void http_cache_purge(struct chained_cache *queue[], int index, int safe_action)
 {
   char url[LARGEBUFLEN], hdrbuf[LARGEBUFLEN], *topic_esc = NULL;
@@ -699,6 +824,11 @@ void http_cache_purge(struct chained_cache *queue[], int index, int safe_action)
       if (config.what_to_count & COUNT_DST_HOST) p_http_geoip_asn(json_obj, &asn_db, &queue[j]->primitives.dst_ip, "dst");
     }
 #endif
+
+    if (local_nets_num) {
+      if (config.what_to_count & COUNT_SRC_HOST) p_http_local_geo(json_obj, &queue[j]->primitives.src_ip, "src");
+      if (config.what_to_count & COUNT_DST_HOST) p_http_local_geo(json_obj, &queue[j]->primitives.dst_ip, "dst");
+    }
 
     json_str = compose_json_str(json_obj);
 

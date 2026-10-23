@@ -304,8 +304,9 @@ def case_class_details_no_ndpi(binary, workdir):
 
 
 # MaxMind's test database, at a fixed commit of github.com/maxmind/MaxMind-DB
-ASN_TEST_DB = ("https://raw.githubusercontent.com/maxmind/MaxMind-DB/"
-               "255b9a8b8a692d70dcaef31dc2ca44fa7ce50ece/test-data/GeoLite2-ASN-Test.mmdb")
+MAXMIND_TEST_DATA = "https://raw.githubusercontent.com/maxmind/MaxMind-DB/255b9a8b8a692d70dcaef31dc2ca44fa7ce50ece/test-data/"
+ASN_TEST_DB = MAXMIND_TEST_DATA + "GeoLite2-ASN-Test.mmdb"
+CITY_TEST_DB = MAXMIND_TEST_DATA + "GeoIP2-City-Test.mmdb"
 
 
 def case_geoip_asn(binary, workdir):
@@ -343,6 +344,35 @@ def case_geoip_asn_missing(binary, workdir):
         check(not any(k.startswith(("asn_", "as_org_")) for k in msgs[0]), "no AS fields")
         check(re.search(r"WARN .*'http_geoip_asn_file' can't be loaded yet", log), "WARN at start")
         check(re.search(r"INFO .*no AS fields in this purge", log), "INFO at the purge")
+    finally:
+        ep.stop()
+
+
+def case_local_geo(binary, workdir):
+    '''http_local_*: the addresses of the local networks get the country, AS and coordinates of the
+    probe in the fields GeoIP leaves empty; the other ones are left as they are'''
+    city, asn = os.path.join(workdir, "city.mmdb"), os.path.join(workdir, "asn.mmdb")
+    urllib.request.urlretrieve(CITY_TEST_DB, city)
+    urllib.request.urlretrieve(ASN_TEST_DB, asn)
+    ep = Endpoint(200)
+    try:
+        log = run_flows(binary, workdir, ep, 0, "http_apikey[t]: %s" % APIKEY, "geoipv2_file: %s" % city,
+                        "http_geoip_asn_file[t]: %s" % asn, "http_local_networks[t]: 10.0.0.0/24, fd00::/8",
+                        "http_local_country[t]: ES", "http_local_asn[t]: 3352",
+                        "http_local_as_org[t]: TELEFONICA DE ESPANA S.A.U.", "http_local_coords[t]: 37.3446,-6.0639",
+                        aggregate=AGGREGATE + ", src_host_country, dst_host_country, src_host_coords, dst_host_coords",
+                        flows=[("10.0.0.1", "81.2.69.142"), ("10.9.9.9", "1.128.0.1")])
+        msgs = {m["ip_src"]: m for m in ep.messages()}
+        check(len(msgs) == 2, "2 messages received, got %d" % len(msgs))
+        local, other = msgs["10.0.0.1"], msgs["10.9.9.9"]
+        check(local.get("country_ip_src") == "ES" and local.get("asn_ip_src") == 3352 and
+              local.get("as_org_ip_src") == "TELEFONICA DE ESPANA S.A.U.", "local source gets ES, AS 3352, got %r" % local)
+        check(local.get("lat_ip_src") == 37.3446 and local.get("lon_ip_src") == -6.0639, "local source gets the coordinates")
+        check(local.get("country_ip_dst") == "GB" and local.get("lat_ip_dst") == 51.5142, "public destination keeps its GeoIP")
+        check(other.get("country_ip_src") == "" and "asn_ip_src" not in other and other.get("lat_ip_src") == 0,
+              "an address out of http_local_networks is left as it is, got %r" % other)
+        check(other.get("asn_ip_dst") == 1221, "public destination keeps its AS")
+        check(not re.search(r"WARN|ERROR", log), "no WARN/ERROR in the log")
     finally:
         ep.stop()
 
