@@ -2851,6 +2851,101 @@ int cfg_key_http_local_coords(char *filename, char *name, char *value_ptr)
   return changes;
 }
 
+int cfg_key_http_geoip_city_file(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.http_geoip_city_file = value_ptr;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.http_geoip_city_file = value_ptr;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_http_geoip_lang(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.http_geoip_lang = value_ptr;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.http_geoip_lang = value_ptr;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_http_local_city(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.http_local_city = value_ptr;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.http_local_city = value_ptr;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_http_local_region(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.http_local_region = value_ptr;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.http_local_region = value_ptr;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_http_local_ip(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.http_local_ip = value_ptr;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.http_local_ip = value_ptr;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
 int cfg_key_sql_locking_style(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;

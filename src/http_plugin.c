@@ -36,8 +36,12 @@
 /* Global variables */
 char default_http_topic[] = "pmacct.acct";
 char default_http_apikey_header[] = "apikey";
+char default_http_geoip_lang[] = "en";
 
 static void p_http_local_init(void);
+#if defined (WITH_GEOIPV2)
+static void p_http_mmdb_check(const char *, const char *, const char *);
+#endif
 
 /* significant digits of the decimal numbers (coordinates): 10 keep 7 decimals
    in any of them, about 1 cm, and spare "-6.0639000000000003" */
@@ -112,23 +116,12 @@ void http_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   }
 
 #if defined (WITH_GEOIPV2)
-  if (config.http_geoip_asn_file) {
-    MMDB_s asn_db;
-    int status = MMDB_open(config.http_geoip_asn_file, MMDB_MODE_MMAP, &asn_db);
-
-    if (status == MMDB_SUCCESS) {
-      Log(LOG_INFO, "INFO ( %s/%s ): 'http_geoip_asn_file' %s loaded\n", config.name, config.type, config.http_geoip_asn_file);
-      MMDB_close(&asn_db);
-    }
-    else Log(LOG_WARNING, "WARN ( %s/%s ): 'http_geoip_asn_file' can't be loaded yet (%s): AS fields are added once it can.\n", config.name, config.type, MMDB_strerror(status));
-
-    if (!(config.what_to_count & (COUNT_SRC_HOST|COUNT_DST_HOST))) {
-      Log(LOG_WARNING, "WARN ( %s/%s ): 'http_geoip_asn_file' needs src_host and/or dst_host in the aggregation method.\n", config.name, config.type);
-    }
-  }
+  p_http_mmdb_check("http_geoip_asn_file", config.http_geoip_asn_file, "AS");
+  p_http_mmdb_check("http_geoip_city_file", config.http_geoip_city_file, "city and region");
+  if (!config.http_geoip_lang) config.http_geoip_lang = default_http_geoip_lang;
 #else
-  if (config.http_geoip_asn_file) {
-    Log(LOG_WARNING, "WARN ( %s/%s ): 'http_geoip_asn_file' requires GeoIP support (--enable-geoipv2); ignored.\n", config.name, config.type);
+  if (config.http_geoip_asn_file || config.http_geoip_city_file) {
+    Log(LOG_WARNING, "WARN ( %s/%s ): 'http_geoip_asn_file' and 'http_geoip_city_file' require GeoIP support (--enable-geoipv2); ignored.\n", config.name, config.type);
   }
 #endif
 
@@ -496,23 +489,114 @@ static void p_http_override(json_t *obj, const char *key, json_t *value)
 }
 
 #if defined (WITH_GEOIPV2)
-/* AS of one end of the flow out of a GeoLite2-ASN (or GeoIP2-ISP) database:
-   "asn_ip_<end>" and "as_org_ip_<end>"; nothing if the address is not there */
-static void p_http_geoip_asn(json_t *obj, MMDB_s *db, struct host_addr *addr, const char *end)
+/* at start, in the plugin process: is the database there? (the purge writers
+   open it again each time, see p_http_mmdb_open) */
+static void p_http_mmdb_check(const char *key, const char *file, const char *what)
+{
+  MMDB_s db;
+  int status;
+
+  if (!file) return;
+
+  status = MMDB_open(file, MMDB_MODE_MMAP, &db);
+
+  if (status == MMDB_SUCCESS) {
+    Log(LOG_INFO, "INFO ( %s/%s ): '%s' %s loaded\n", config.name, config.type, key, file);
+    MMDB_close(&db);
+  }
+  else Log(LOG_WARNING, "WARN ( %s/%s ): '%s' can't be loaded yet (%s): %s fields are added once it can.\n", config.name, config.type, key, MMDB_strerror(status), what);
+
+  if (!(config.what_to_count & (COUNT_SRC_HOST|COUNT_DST_HOST))) {
+    Log(LOG_WARNING, "WARN ( %s/%s ): '%s' needs src_host and/or dst_host in the aggregation method.\n", config.name, config.type, key);
+  }
+}
+
+/* opened at every purge (mmap, cheap): a new version of the file, ie. by
+   geoipupdate, is picked up with no reload */
+static int p_http_mmdb_open(const char *key, const char *file, MMDB_s *db, const char *what)
+{
+  int status;
+
+  if (!file) return FALSE;
+
+  status = MMDB_open(file, MMDB_MODE_MMAP, db);
+  if (status == MMDB_SUCCESS) return TRUE;
+
+  Log(LOG_INFO, "INFO ( %s/%s ): '%s' can't be loaded (%s): no %s fields in this purge.\n", config.name, config.type, key, MMDB_strerror(status), what);
+
+  return FALSE;
+}
+
+static MMDB_lookup_result_s p_http_mmdb_lookup(MMDB_s *db, struct host_addr *addr)
 {
   struct sockaddr_storage ss;
   MMDB_lookup_result_s result;
-  MMDB_entry_data_s data;
-  char key[SRVBUFLEN];
   int mmdb_error;
 
-  if (!addr->family) return;
+  memset(&result, 0, sizeof(result));
+  if (!addr->family) return result;
 
   memset(&ss, 0, sizeof(ss));
   addr_to_sa((struct sockaddr *) &ss, addr, 0);
 
   result = MMDB_lookup_sockaddr(db, (struct sockaddr *) &ss, &mmdb_error);
-  if (mmdb_error != MMDB_SUCCESS || !result.found_entry) return;
+  if (mmdb_error != MMDB_SUCCESS) result.found_entry = FALSE;
+
+  return result;
+}
+
+/* a name in http_geoip_lang or, if the database has none in it, in English;
+   path is { "city", "names", <lang>, NULL } with the language left empty */
+static json_t *p_http_mmdb_name(MMDB_entry_s *entry, const char **path, int lang_idx)
+{
+  const char *langs[] = { config.http_geoip_lang, "en" };
+  MMDB_entry_data_s data;
+  int idx;
+
+  for (idx = 0; idx < 2; idx++) {
+    path[lang_idx] = langs[idx];
+
+    if (MMDB_aget_value(entry, &data, path) == MMDB_SUCCESS && data.has_data &&
+        data.type == MMDB_DATA_TYPE_UTF8_STRING && data.data_size) {
+      return json_stringn(data.utf8_string, data.data_size);
+    }
+  }
+
+  return NULL;
+}
+
+/* city and region (first level of subdivisions, ie. Andalucía) of one end of
+   the flow out of a GeoLite2-City database: "city_ip_<end>", "region_ip_<end>" */
+static void p_http_geoip_city(json_t *obj, MMDB_s *db, struct host_addr *addr, const char *end)
+{
+  const char *city_path[] = { "city", "names", NULL, NULL };
+  const char *region_path[] = { "subdivisions", "0", "names", NULL, NULL };
+  MMDB_lookup_result_s result = p_http_mmdb_lookup(db, addr);
+  char key[SRVBUFLEN];
+  json_t *name;
+
+  if (!result.found_entry) return;
+
+  if ((name = p_http_mmdb_name(&result.entry, city_path, 2))) {
+    snprintf(key, sizeof(key), "city_ip_%s", end);
+    p_http_override(obj, key, name);
+  }
+
+  if ((name = p_http_mmdb_name(&result.entry, region_path, 3))) {
+    snprintf(key, sizeof(key), "region_ip_%s", end);
+    p_http_override(obj, key, name);
+  }
+}
+
+/* AS of one end of the flow out of a GeoLite2-ASN (or GeoIP2-ISP) database:
+   "asn_ip_<end>" and "as_org_ip_<end>"; nothing if the address is not there */
+static void p_http_geoip_asn(json_t *obj, MMDB_s *db, struct host_addr *addr, const char *end)
+{
+  MMDB_lookup_result_s result = p_http_mmdb_lookup(db, addr);
+  MMDB_entry_data_s data;
+  char key[SRVBUFLEN];
+
+  if (!result.found_entry) return;
 
   if (MMDB_get_value(&result.entry, &data, "autonomous_system_number", NULL) == MMDB_SUCCESS &&
       data.has_data && data.type == MMDB_DATA_TYPE_UINT32) {
@@ -530,7 +614,7 @@ static void p_http_geoip_asn(json_t *obj, MMDB_s *db, struct host_addr *addr, co
 
 /* Where the probe is, for the addresses of the local networks, which no GeoIP
    database knows: http_local_networks, http_local_country, http_local_asn,
-   http_local_as_org, http_local_coords */
+   http_local_as_org, http_local_city, http_local_region, http_local_coords */
 #define HTTP_LOCAL_NETWORKS_MAX 64
 
 struct p_http_local_net {
@@ -544,6 +628,7 @@ static int local_nets_num;
 static json_int_t local_asn;
 static double local_lat, local_lon;
 static int local_coords;
+static struct host_addr local_ip;  /* public address of the site, looked up in http_geoip_city_file */
 
 /* parsed once in the plugin process; the purge writers inherit it */
 static void p_http_local_init(void)
@@ -582,6 +667,12 @@ static void p_http_local_init(void)
 
   if (config.http_local_asn) local_asn = strtoll(config.http_local_asn, NULL, 10);
 
+  if (config.http_local_ip) {
+    if (inet_pton(AF_INET, config.http_local_ip, &local_ip.address.ipv4) == 1) local_ip.family = AF_INET;
+    else if (inet_pton(AF_INET6, config.http_local_ip, &local_ip.address.ipv6) == 1) local_ip.family = AF_INET6;
+    else Log(LOG_WARNING, "WARN ( %s/%s ): 'http_local_ip' is not an IP address, ignored.\n", config.name, config.type);
+  }
+
   if (config.http_local_coords) {
     if (sscanf(config.http_local_coords, "%lf,%lf", &local_lat, &local_lon) == 2) local_coords = TRUE;
     else Log(LOG_WARNING, "WARN ( %s/%s ): 'http_local_coords' is not '<latitude>,<longitude>', ignored.\n", config.name, config.type);
@@ -615,11 +706,14 @@ static int p_http_is_local(struct host_addr *addr)
 }
 
 /* fills in, for a local address, the GeoIP fields left empty: country only if
-   the country primitive is there, AS and coordinates if configured */
-static void p_http_local_geo(json_t *obj, struct host_addr *addr, const char *end)
+   the country primitive is there, AS, city, region and coordinates if configured */
+static void p_http_local_geo(json_t *obj, struct host_addr *addr, const char *end, void *city_db)
 {
   char key[SRVBUFLEN], key2[SRVBUFLEN];
   json_t *value, *value2;
+#if defined (WITH_GEOIPV2)
+  json_t *site = NULL;
+#endif
 
   if (!p_http_is_local(addr)) return;
 
@@ -638,6 +732,22 @@ static void p_http_local_geo(json_t *obj, struct host_addr *addr, const char *en
       json_object_set_new(obj, key, json_string(config.http_local_as_org));
     }
   }
+
+  snprintf(key, sizeof(key), "city_ip_%s", end);
+  if (config.http_local_city && !json_object_get(obj, key)) json_object_set_new(obj, key, json_string(config.http_local_city));
+
+  snprintf(key, sizeof(key), "region_ip_%s", end);
+  if (config.http_local_region && !json_object_get(obj, key)) json_object_set_new(obj, key, json_string(config.http_local_region));
+
+#if defined (WITH_GEOIPV2)
+  /* what is still missing, out of the public address of the site in the same
+     database and language as the other addresses */
+  if (city_db && local_ip.family && (site = json_object())) {
+    p_http_geoip_city(site, (MMDB_s *) city_db, &local_ip, end);
+    json_object_update_missing(obj, site);
+    json_decref(site);
+  }
+#endif
 
   snprintf(key, sizeof(key), "lat_ip_%s", end);
   snprintf(key2, sizeof(key2), "lon_ip_%s", end);
@@ -670,8 +780,8 @@ void http_cache_purge(struct chained_cache *queue[], int index, int safe_action)
   struct curl_slist *headers = NULL;
   CURL *curl = NULL;
 #if defined (WITH_GEOIPV2)
-  MMDB_s asn_db;
-  int asn_db_open = FALSE;
+  MMDB_s asn_db, city_db;
+  int asn_db_open, city_db_open;
 #endif
 
   memset(&batch, 0, sizeof(batch));
@@ -732,14 +842,8 @@ void http_cache_purge(struct chained_cache *queue[], int index, int safe_action)
   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, p_http_discard_cb);
 
 #if defined (WITH_GEOIPV2)
-  /* opened at every purge (mmap, cheap): a new version of the file, ie. by
-     geoipupdate, is picked up with no reload */
-  if (config.http_geoip_asn_file) {
-    int status = MMDB_open(config.http_geoip_asn_file, MMDB_MODE_MMAP, &asn_db);
-
-    if (status == MMDB_SUCCESS) asn_db_open = TRUE;
-    else Log(LOG_INFO, "INFO ( %s/%s ): 'http_geoip_asn_file' can't be loaded (%s): no AS fields in this purge.\n", config.name, config.type, MMDB_strerror(status));
-  }
+  asn_db_open = p_http_mmdb_open("http_geoip_asn_file", config.http_geoip_asn_file, &asn_db, "AS");
+  city_db_open = p_http_mmdb_open("http_geoip_city_file", config.http_geoip_city_file, &city_db, "city and region");
 #endif
 
   if (config.print_markers) {
@@ -837,11 +941,21 @@ void http_cache_purge(struct chained_cache *queue[], int index, int safe_action)
       if (config.what_to_count & COUNT_SRC_HOST) p_http_geoip_asn(json_obj, &asn_db, &queue[j]->primitives.src_ip, "src");
       if (config.what_to_count & COUNT_DST_HOST) p_http_geoip_asn(json_obj, &asn_db, &queue[j]->primitives.dst_ip, "dst");
     }
+
+    if (city_db_open) {
+      if (config.what_to_count & COUNT_SRC_HOST) p_http_geoip_city(json_obj, &city_db, &queue[j]->primitives.src_ip, "src");
+      if (config.what_to_count & COUNT_DST_HOST) p_http_geoip_city(json_obj, &city_db, &queue[j]->primitives.dst_ip, "dst");
+    }
 #endif
 
     if (local_nets_num) {
-      if (config.what_to_count & COUNT_SRC_HOST) p_http_local_geo(json_obj, &queue[j]->primitives.src_ip, "src");
-      if (config.what_to_count & COUNT_DST_HOST) p_http_local_geo(json_obj, &queue[j]->primitives.dst_ip, "dst");
+      void *local_city_db = NULL;
+
+#if defined (WITH_GEOIPV2)
+      if (city_db_open) local_city_db = &city_db;
+#endif
+      if (config.what_to_count & COUNT_SRC_HOST) p_http_local_geo(json_obj, &queue[j]->primitives.src_ip, "src", local_city_db);
+      if (config.what_to_count & COUNT_DST_HOST) p_http_local_geo(json_obj, &queue[j]->primitives.dst_ip, "dst", local_city_db);
     }
 
     json_str = p_http_json_str(json_obj);
@@ -882,6 +996,7 @@ void http_cache_purge(struct chained_cache *queue[], int index, int safe_action)
 
 #if defined (WITH_GEOIPV2)
   if (asn_db_open) MMDB_close(&asn_db);
+  if (city_db_open) MMDB_close(&city_db);
 #endif
 
   Log(LOG_INFO, "INFO ( %s/%s ): *** Purging cache - END (PID: %u, QN: %u/%u, ET: %lu) ***\n",

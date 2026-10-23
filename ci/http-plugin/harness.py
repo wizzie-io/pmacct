@@ -380,6 +380,47 @@ def case_local_geo(binary, workdir):
         ep.stop()
 
 
+def case_geoip_city(binary, workdir):
+    '''http_geoip_city_file adds city and region in http_geoip_lang, English when the database lacks
+    it; local addresses get http_local_city and http_local_region'''
+    city = os.path.join(workdir, "city.mmdb")
+    urllib.request.urlretrieve(CITY_TEST_DB, city)
+    ep = Endpoint(200)
+    try:
+        log = run_flows(binary, workdir, ep, 0, "http_apikey[t]: %s" % APIKEY, "http_geoip_city_file[t]: %s" % city,
+                        "http_geoip_lang[t]: es", "http_local_networks[t]: 10.0.0.0/24",
+                        "http_local_city[t]: Mairena del Aljarafe", "http_local_region[t]: Andalucía",
+                        flows=[("10.0.0.1", "81.2.69.142"), ("10.9.9.9", "89.160.20.112")])
+        msgs = {m["ip_src"]: m for m in ep.messages()}
+        check(len(msgs) == 2, "2 messages received, got %d" % len(msgs))
+        local, other = msgs["10.0.0.1"], msgs["10.9.9.9"]
+        check(local.get("city_ip_dst") == "Londres" and local.get("region_ip_dst") == "Inglaterra",
+              "names in Spanish, got %r" % local)
+        check(local.get("city_ip_src") == "Mairena del Aljarafe" and local.get("region_ip_src") == "Andalucía",
+              "local source gets http_local_city and http_local_region")
+        check(other.get("city_ip_dst") == "Linköping" and other.get("region_ip_dst") == "Östergötland County",
+              "English when there is no Spanish name, got %r" % other)
+        check("city_ip_src" not in other and "region_ip_src" not in other, "a private address out of the local networks gets none")
+        check(re.search(r"'http_geoip_city_file' .* loaded", log), "INFO about the database loaded")
+        check(not re.search(r"WARN|ERROR", log), "no WARN/ERROR in the log")
+    finally:
+        ep.stop()
+
+    # no http_local_city / http_local_region: those of http_local_ip in the database
+    ep = Endpoint(200)
+    try:
+        log = run_flows(binary, workdir, ep, 0, "http_apikey[t]: %s" % APIKEY, "http_geoip_city_file[t]: %s" % city,
+                        "http_geoip_lang[t]: es", "http_local_networks[t]: 10.0.0.0/24", "http_local_ip[t]: 81.2.69.142",
+                        flows=[("10.0.0.1", "89.160.20.112")])
+        msgs = ep.messages()
+        check(len(msgs) == 1, "1 message received, got %d" % len(msgs))
+        check(msgs[0].get("city_ip_src") == "Londres" and msgs[0].get("region_ip_src") == "Inglaterra",
+              "local source gets the city of http_local_ip, in Spanish, got %r" % msgs[0])
+        check(not re.search(r"WARN|ERROR", log), "no WARN/ERROR in the log")
+    finally:
+        ep.stop()
+
+
 def case_retry_5xx(binary, workdir):
     '''5xx is retried http_retries times, then the batch is dropped with an ERROR'''
     ep = Endpoint(500)

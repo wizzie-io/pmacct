@@ -1022,13 +1022,30 @@ DESC:		Full pathname to a MaxMind GeoLite2-ASN (or GeoIP2-ISP) database, binary 
 		--enable-geoipv2 a warning is logged and the knob is ignored.
 DEFAULT:	none
 
+KEY:		http_geoip_city_file
+DESC:		Full pathname to a MaxMind GeoLite2-City (or GeoIP2-City) database, binary format, usually
+		the same file as geoipv2_file. If set and pmacct is compiled with --enable-geoipv2, each
+		message gets the city and region (first level of subdivisions, ie. a Spanish autonomous
+		community) of its source and destination IP addresses, which pmacct primitives don't
+		cover: 'city_ip_src', 'city_ip_dst', 'region_ip_src', 'region_ip_dst', named in
+		http_geoip_lang. Addresses not in the database, or with no city, get none of these
+		fields. Opened at every purge, like http_geoip_asn_file.
+DEFAULT:	none
+
+KEY:		http_geoip_lang
+DESC:		Language of the names of http_geoip_city_file, as the database names it (ie. "es",
+		"en", "de", "fr", "ja", "pt-BR", "ru", "zh-CN"). Names missing in it are given in English.
+DEFAULT:	en
+
 KEY:		http_local_networks
 DESC:		Comma separated list of networks (IPv4 or IPv6, ie. "192.168.102.0/24, fd00::/8") where
 		the probe is. GeoIP databases don't know private addresses, so for an address in these
 		networks the http plugin fills in the GeoIP fields left empty with where the probe is:
 		'country_ip_src'/'country_ip_dst' with http_local_country (only if the country
 		primitive is in the aggregation method and the field came out empty), 'asn_ip_*' and
-		'as_org_ip_*' with http_local_asn and http_local_as_org (if the message has none), and
+		'as_org_ip_*' with http_local_asn and http_local_as_org (if the message has none),
+		'city_ip_*' and 'region_ip_*' with http_local_city and http_local_region (if the
+		message has none), and
 		'lat_ip_*'/'lon_ip_*' with http_local_coords (only if the coords primitive is in the
 		aggregation method and they came out as 0, 0). Up to 64 networks.
 DEFAULT:	none
@@ -1045,6 +1062,21 @@ DEFAULT:	none
 KEY:		http_local_as_org
 DESC:		AS organization of the addresses in http_local_networks (ie. "TELEFONICA DE ESPANA
 		S.A.U."). Only used along with http_local_asn.
+DEFAULT:	none
+
+KEY:		http_local_city
+DESC:		City of the addresses in http_local_networks (ie. "Sevilla").
+DEFAULT:	none
+
+KEY:		http_local_region
+DESC:		Region of the addresses in http_local_networks (ie. "Andalucía").
+DEFAULT:	none
+
+KEY:		http_local_ip
+DESC:		Public IP address the site goes out to Internet with (ie. the one ipinfo.io reports).
+		With http_geoip_city_file, the city and region the addresses in http_local_networks
+		still lack (no http_local_city, http_local_region) are those of this address in that
+		database, in http_geoip_lang like the rest.
 DEFAULT:	none
 
 KEY:		http_local_coords

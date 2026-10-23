@@ -203,6 +203,11 @@ struct configuration {
   char *http_local_asn;
   char *http_local_as_org;
   char *http_local_coords;
+  char *http_geoip_city_file;
+  char *http_geoip_lang;
+  char *http_local_city;
+  char *http_local_region;
+  char *http_local_ip;
   char *kafka_writer_id;
   int print_cache_entries;
   int print_markers;
