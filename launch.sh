@@ -42,6 +42,7 @@ CLASSIFIER_NUM_ROOTS=${CLASSIFIER_NUM_ROOTS:-512}
 CLASSIFIER_MAX_FLOWS=${CLASSIFIER_MAX_FLOWS:-200000}
 CLASSIFIER_PROTO_GUESS=${CLASSIFIER_PROTO_GUESS:-True}
 CLASS_SPLIT=${CLASS_SPLIT:-True}
+CLASS_DETAILS=${CLASS_DETAILS:-True}
 HTTP_TIMEOUT=${HTTP_TIMEOUT:-10}
 HTTP_RETRIES=${HTTP_RETRIES:-3}
 HTTP_MULTI_VALUES=${HTTP_MULTI_VALUES:-131072}
@@ -179,6 +180,7 @@ fi
   [ -n "$OVERRIDE_PREFIX" ] && echo "http_override_prefix[$P]: $OVERRIDE_PREFIX"
   [ -n "$LOCAL_NETWORKS" ] && echo "http_label_flatten[$P]: true"
   if is_true "$CLASS_SPLIT"; then echo "http_class_split[$P]: true"; fi
+  if is_true "$CLASS_DETAILS"; then echo "http_class_details[$P]: true"; fi
 
   if [ -n "$EXTRA_CONFIG" ]; then
     echo "! EXTRA_CONFIG"

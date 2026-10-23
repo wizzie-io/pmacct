@@ -971,7 +971,7 @@ DEFAULT:	none
 KEY:		http_override_prefix
 DESC:		When the plugin replaces a field pmacct already put in a message (currently
 		'event_type' via http_event_type, 'l7_protocol' and 'application' via
-		http_class_split), the original value is kept in a field named
+		http_class_split, 'application_category' and 'ip_owner' via http_class_details), the original value is kept in a field named
 		after this prefix plus the original name, ie. with 'pmacct_' the message carries
 		"event_type": "pmacct_flow", "pmacct_event_type": "purge". If not set, the
 		original value is dropped.
@@ -996,6 +996,17 @@ DESC:		With 'class' in the aggregation method, nDPI classifies traffic as
 		app protocol, ie. "QUIC/YouTube" gives "l7_protocol": "QUIC", "application":
 		"YouTube" and "Unknown/DNS" gives "DNS" in both. A class with no '/' (no nDPI) goes
 		to both fields as it is. The 'class' field is left in place.
+DEFAULT:	false
+
+KEY:		http_class_details
+VALUES:		[ true | false ]
+DESC:		With 'class' in the aggregation method and nDPI support compiled in, adds two
+		fields with what else nDPI knows about the traffic: 'application_category', the
+		nDPI category of the class (ie. "Web", "Network", "Streaming", "SocialNetwork";
+		"Unspecified" if none), and 'ip_owner', the protocol or service nDPI associates
+		with the IP addresses alone, regardless of the payload (ie. "AmazonAWS",
+		"Google"; "Unknown" if none). Without nDPI a warning is logged and the knob is
+		ignored.
 DEFAULT:	false
 
 KEY:            [ bgp_daemon_msglog_kafka_broker_host | bgp_table_dump_kafka_broker_host |

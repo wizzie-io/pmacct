@@ -285,6 +285,20 @@ def case_class_split(binary, workdir):
         ep.stop()
 
 
+def case_class_details_no_ndpi(binary, workdir):
+    '''http_class_details needs nDPI: without it, a warning and no extra fields'''
+    ep = Endpoint(200)
+    try:
+        log = run_flows(binary, workdir, ep, 1, "http_apikey[t]: %s" % APIKEY,
+                        "http_class_details[t]: true", aggregate=AGGREGATE + ", class")
+        msgs = ep.messages()
+        check(len(msgs) == 1, "1 message received, got %d" % len(msgs))
+        check("application_category" not in msgs[0] and "ip_owner" not in msgs[0], "no nDPI fields")
+        check(re.search(r"WARN .*'http_class_details' requires nDPI", log), "WARN about the missing nDPI")
+    finally:
+        ep.stop()
+
+
 def case_retry_5xx(binary, workdir):
     '''5xx is retried http_retries times, then the batch is dropped with an ERROR'''
     ep = Endpoint(500)

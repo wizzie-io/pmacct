@@ -26,6 +26,9 @@
 #include "plugin_common.h"
 #include "plugin_cmn_json.h"
 #include "http_plugin.h"
+#if defined (WITH_NDPI)
+#include "ndpi/ndpi.h"
+#endif
 #ifndef WITH_JANSSON
 #error "--enable-http requires --enable-jansson"
 #endif
@@ -101,6 +104,12 @@ void http_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   if (config.http_label_flatten && !config.pretag_label_encode_as_map) {
     Log(LOG_WARNING, "WARN ( %s/%s ): 'http_label_flatten' requires 'pre_tag_label_encode_as_map: true'; labels are left as they are.\n", config.name, config.type);
   }
+
+#if !defined (WITH_NDPI)
+  if (config.http_class_details) {
+    Log(LOG_WARNING, "WARN ( %s/%s ): 'http_class_details' requires nDPI support (--enable-ndpi); ignored.\n", config.name, config.type);
+  }
+#endif
 
   /* setting some defaults */
   if (!config.sql_table) config.sql_table = default_http_topic;
@@ -603,6 +612,17 @@ void http_cache_purge(struct chained_cache *queue[], int index, int safe_action)
         p_http_override(json_obj, "application", json_string(app));
       }
     }
+
+#if defined (WITH_NDPI)
+    /* what else nDPI knows about the class: its category and, out of the
+       addresses alone, who the traffic belongs to */
+    if (config.http_class_details && (config.what_to_count_2 & COUNT_NDPI_CLASS)) {
+      pm_class2_t *ndpi_class = &queue[j]->primitives.ndpi_class;
+
+      p_http_override(json_obj, "application_category", json_string(ndpi_category_get_name(pm_ndpi_wfl->ndpi_struct, ndpi_class->category)));
+      p_http_override(json_obj, "ip_owner", json_string(ndpi_get_proto_name(pm_ndpi_wfl->ndpi_struct, ndpi_class->protocol_by_ip)));
+    }
+#endif
 
     json_str = compose_json_str(json_obj);
 

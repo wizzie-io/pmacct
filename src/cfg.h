@@ -196,6 +196,7 @@ struct configuration {
   char *http_override_prefix;
   int http_label_flatten;
   int http_class_split;
+  int http_class_details;
   char *kafka_writer_id;
   int print_cache_entries;
   int print_markers;
