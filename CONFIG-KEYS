@@ -1049,6 +1049,21 @@ DESC:		If pmacct is compiled with --enable-h3 (Uber's H3, https://h3geo.org), ea
 		no cells. Without --enable-h3 a warning is logged and the knob is ignored.
 DEFAULT:	none
 
+KEY:		http_local_remote
+VALUES:		[ true | false ]
+DESC:		Names the fields of each end of the flow after where it is, local or remote, instead of
+		source and destination, following the 'direction' label: with "in" the local end is the
+		destination, with "out" or "local" (both ends local) the source. Data matching no label
+		rule gets "direction": "unknown" and the source as local. The fields of each end,
+		ie. 'ip_src', 'mac_src', 'port_src', 'net_src', 'mask_src', 'country_ip_src',
+		'pocode_ip_src', 'lat_ip_src', 'lon_ip_src', 'city_ip_src', 'region_ip_src',
+		'asn_ip_src', 'as_org_ip_src', 'h3_src', 'h3_city_src', 'h3_region_src' and
+		'h3_country_src', become 'local_<name>' or 'remote_<name>' (ie. 'local_ip',
+		'remote_country', 'remote_h3_city'), after GeoIP, http_local_* and H3. Needs the label
+		map (pre_tag_label_encode_as_map) and http_label_flatten, so that 'direction' is at the
+		top level of the message; otherwise a warning is logged and every message is "unknown".
+DEFAULT:	false
+
 KEY:		http_static_fields_file
 DESC:		Full pathname to a file with a JSON object (ie. {"path": ["org.site"], "device_id": 7}):
 		its fields are added to every data message, never to the purge_init/purge_close

@@ -62,6 +62,38 @@ static void p_http_mmdb_check(const char *, const char *, const char *);
 static int h3_resolution = -1;
 #endif
 
+/* http_local_remote: the fields of each end of the flow, "<prefix><end>" (ie.
+   "country_ip_src"), become "local_<name>" or "remote_<name>" after the
+   'direction' label (ie. "remote_country") */
+struct p_http_end_field {
+  const char *prefix;
+  const char *name;
+};
+
+static const struct p_http_end_field end_fields[] = {
+  {"ip_", "ip"},
+  {"mac_", "mac"},
+  {"port_", "port"},
+  {"net_", "net"},
+  {"mask_", "mask"},
+  {"country_ip_", "country"},
+  {"pocode_ip_", "pocode"},
+  {"lat_ip_", "lat"},
+  {"lon_ip_", "lon"},
+  {"city_ip_", "city"},
+  {"region_ip_", "region"},
+  {"asn_ip_", "asn"},
+  {"as_org_ip_", "as_org"},
+  {"h3_", "h3"},
+  {"h3_city_", "h3_city"},
+  {"h3_region_", "h3_region"},
+  {"h3_country_", "h3_country"},
+  {NULL, NULL}
+};
+
+/* 'direction' of the data no label rule matches */
+#define HTTP_DIRECTION_UNKNOWN "unknown"
+
 /* fields of http_static_fields_file, added to every data message */
 static json_t *static_fields;
 
@@ -145,6 +177,10 @@ void http_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
   p_http_local_init();
   p_http_static_init();
+
+  if (config.http_local_remote && !config.http_label_flatten) {
+    Log(LOG_WARNING, "WARN ( %s/%s ): 'http_local_remote' reads 'direction' at the top level of the message, which needs 'http_label_flatten: true'.\n", config.name, config.type);
+  }
 
   if (config.http_h3_resolution) {
 #if defined (WITH_H3)
@@ -795,6 +831,41 @@ static void p_http_local_geo(json_t *obj, struct host_addr *addr, const char *en
   }
 }
 
+static void p_http_rename_end(json_t *obj, const char *prefix, const char *end, const char *side, const char *name)
+{
+  char key[SRVBUFLEN], new_key[SRVBUFLEN];
+  json_t *value;
+
+  snprintf(key, sizeof(key), "%s%s", prefix, end);
+  if (!(value = json_object_get(obj, key))) return;
+
+  snprintf(new_key, sizeof(new_key), "%s_%s", side, name);
+  json_object_set(obj, new_key, value);
+  json_object_del(obj, key);
+}
+
+/* each end of the flow as local or remote: "in" has the local end at the
+   destination, "out" and "local" (both ends local) at the source. Data with no
+   direction gets "unknown" and the source as local, so the message is the same
+   shape anyway */
+static void p_http_local_remote(json_t *obj)
+{
+  json_t *direction = json_object_get(obj, "direction");
+  const char *local_end = "src", *remote_end = "dst";
+  int idx;
+
+  if (!json_is_string(direction)) json_object_set_new(obj, "direction", json_string(HTTP_DIRECTION_UNKNOWN));
+  else if (!strcmp(json_string_value(direction), "in")) {
+    local_end = "dst";
+    remote_end = "src";
+  }
+
+  for (idx = 0; end_fields[idx].prefix; idx++) {
+    p_http_rename_end(obj, end_fields[idx].prefix, local_end, "local", end_fields[idx].name);
+    p_http_rename_end(obj, end_fields[idx].prefix, remote_end, "remote", end_fields[idx].name);
+  }
+}
+
 /* read once in the plugin process; the purge writers inherit it. A missing or
    wrong file leaves the messages without static fields, the plugin goes on */
 static void p_http_static_init(void)
@@ -1066,6 +1137,9 @@ void http_cache_purge(struct chained_cache *queue[], int index, int safe_action)
       p_http_h3(json_obj, "dst");
     }
 #endif
+
+    /* once every field of each end is there: GeoIP, http_local_*, H3 */
+    if (config.http_local_remote) p_http_local_remote(json_obj);
 
     /* last, so they never override what the message already has */
     if (static_fields) json_object_update_missing(json_obj, static_fields);

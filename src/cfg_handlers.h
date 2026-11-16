@@ -153,6 +153,7 @@ extern int cfg_key_http_local_region(char *, char *, char *);
 extern int cfg_key_http_local_ip(char *, char *, char *);
 extern int cfg_key_http_h3_resolution(char *, char *, char *);
 extern int cfg_key_http_static_fields_file(char *, char *, char *);
+extern int cfg_key_http_local_remote(char *, char *, char *);
 extern int cfg_key_plugin_pipe_size(char *, char *, char *);
 extern int cfg_key_plugin_buffer_size(char *, char *, char *);
 extern int cfg_key_plugin_pipe_zmq(char *, char *, char *);

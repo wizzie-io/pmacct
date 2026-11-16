@@ -450,6 +450,53 @@ def case_h3(binary, workdir):
         ep.stop()
 
 
+def case_local_remote(binary, workdir):
+    '''http_local_remote: the fields of each end named local_* / remote_* after direction (out,
+    in, local, unknown with no label), GeoIP, http_local_* and H3 included; no *_src/*_dst left'''
+    city, asn = os.path.join(workdir, "city.mmdb"), os.path.join(workdir, "asn.mmdb")
+    urllib.request.urlretrieve(CITY_TEST_DB, city)
+    urllib.request.urlretrieve(ASN_TEST_DB, asn)
+    pretag = os.path.join(workdir, "pretag.map")
+    with open(pretag, "w") as f:
+        f.write("set_label=direction%local src_net=10.0.0.0/24 dst_net=10.0.0.0/24\n"
+                "set_label=direction%out src_net=10.0.0.1/32\n"
+                "set_label=direction%in dst_net=10.0.0.2/32\n")
+    ep = Endpoint(200)
+    try:
+        log = run_flows(binary, workdir, ep, 0, "http_apikey[t]: %s" % APIKEY, "geoipv2_file: %s" % city,
+                        "pre_tag_map: %s" % pretag, "pre_tag_label_encode_as_map: true", "http_label_flatten[t]: true",
+                        "http_geoip_asn_file[t]: %s" % asn, "http_geoip_city_file[t]: %s" % city,
+                        "http_local_networks[t]: 10.0.0.0/24", "http_local_country[t]: ES", "http_local_asn[t]: 3352",
+                        "http_local_coords[t]: 37.3446,-6.0639", "http_h3_resolution[t]: 7", "http_local_remote[t]: true",
+                        aggregate=AGGREGATE + ", label, src_host_country, dst_host_country, src_host_coords, dst_host_coords",
+                        flows=[("10.0.0.1", "81.2.69.142"), ("81.2.69.142", "10.0.0.2"), ("10.0.0.3", "10.0.0.4"),
+                               ("1.128.0.1", "89.160.20.112")])
+        msgs = {m.get("local_ip"): m for m in ep.messages()}
+        check(len(msgs) == 4, "4 messages received, got %r" % list(msgs))
+        for m in msgs.values():
+            check(not [k for k in m if k.endswith("_src") or k.endswith("_dst")], "no *_src/*_dst left, got %r" % m)
+
+        out, inbound, local, unknown = msgs["10.0.0.1"], msgs["10.0.0.2"], msgs["10.0.0.3"], msgs["1.128.0.1"]
+        check(out.get("direction") == "out" and out.get("remote_ip") == "81.2.69.142" and
+              out.get("local_port") == 40000 and out.get("remote_port") == 443, "out: local is the source, got %r" % out)
+        check(out.get("remote_country") == "GB" and out.get("remote_lat") == 51.5142 and out.get("remote_city") == "London"
+              and out.get("remote_h3") == "87194ad30ffffff", "out: GeoIP and H3 of the remote end, got %r" % out)
+        check(out.get("local_country") == "ES" and out.get("local_asn") == 3352 and out.get("local_lat") == 37.3446
+              and out.get("local_h3") == "87391c71effffff", "out: the site in the local end, got %r" % out)
+        check(inbound.get("direction") == "in" and inbound.get("remote_ip") == "81.2.69.142" and
+              inbound.get("local_port") == 443 and inbound.get("remote_port") == 40001 and
+              inbound.get("remote_country") == "GB" and inbound.get("local_country") == "ES",
+              "in: local is the destination, got %r" % inbound)
+        check(local.get("direction") == "local" and local.get("remote_ip") == "10.0.0.4" and
+              local.get("local_country") == "ES" and local.get("remote_country") == "ES",
+              "local: source as local, both with the site, got %r" % local)
+        check(unknown.get("direction") == "unknown" and unknown.get("remote_ip") == "89.160.20.112" and
+              unknown.get("local_asn") == 1221, "no label: unknown, source as local with its own GeoIP, got %r" % unknown)
+        check(not re.search(r"WARN|ERROR", log), "no WARN/ERROR in the log")
+    finally:
+        ep.stop()
+
+
 def case_static_fields(binary, workdir):
     '''http_static_fields_file adds its fields to every data message, never to the markers, and
     never overrides what the message has'''
