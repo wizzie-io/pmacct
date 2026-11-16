@@ -27,15 +27,15 @@ Cada `REFRESH_TIME` segundos se publica un mensaje por cada combinación de los 
 
 ```json
 {
-  "event_type": "pmacct_flow", "class": "TLS/Github", "l7_protocol": "TLS", "application": "Github",
-  "application_category": "Collaborative", "ip_owner": "Azure",
-  "mac_src": "14:98:77:39:28:b5", "mac_dst": "8c:ed:e1:14:74:4c", "vlan": 0, "etype": "800",
-  "ip_src": "192.168.102.9", "ip_dst": "20.250.119.67", "port_src": 63979, "port_dst": 443,
+  "event_type": "pmacct_flow", "class": "TLS/Github", "vlan": 0, "etype": "800",
   "tcp_flags": "24", "ip_proto": "tcp", "tos": 2,
   "stamp_inserted": "2026-10-22 15:57:00", "stamp_updated": "2026-10-22 15:58:01",
   "packets": 6, "bytes": 3941, "writer_id": "wdp/10",
   "timestamp": 1792684620, "event_source": "pmacct", "pmacct_event_type": "purge",
-  "direction": "out"
+  "direction": "out", "l7_protocol": "TLS", "application": "Github",
+  "application_category": "Collaborative", "ip_owner": "Azure",
+  "local_mac": "14:98:77:39:28:b5", "remote_mac": "8c:ed:e1:14:74:4c",
+  "local_ip": "192.168.102.9", "remote_ip": "20.250.119.67", "local_port": 63979, "remote_port": 443
 }
 ```
 
@@ -57,8 +57,19 @@ Cada `REFRESH_TIME` segundos se publica un mensaje por cada combinación de los 
   `Network`, `Streaming`…) y a quién asocia nDPI las IPs del flujo, independientemente del
   contenido (`AmazonAWS`, `Google`…; `Unknown` si a nadie). `ip_owner` da pistas cuando la
   aplicación no se ha identificado, p. ej. en un `Unknown/TLS` sin SNI.
-- `direction`: solo con `LOCAL_NETWORKS`. `out` (sale de las redes locales, subida), `in`
-  (entra, bajada) o `local` (entre redes locales, o hacia multicast/broadcast).
+- `direction`, a partir de `LOCAL_NETWORKS` (por defecto, los rangos privados): `out` (sale de
+  las redes locales, subida), `in` (entra, bajada), `local` (entre redes locales, o hacia
+  multicast/broadcast) o `unknown` (ninguna regla coincide: ver *Configuración generada*).
+- `local_*` / `remote_*` (`LOCAL_REMOTE`): los campos de cada extremo llevan el nombre de dónde
+  está, no de si es origen o destino: `local_ip`/`remote_ip`, `local_mac`/`remote_mac`,
+  `local_port`/`remote_port` y, con `NET_FIELDS`, GeoIP y H3, `local_net`, `remote_country`,
+  `remote_asn`, `remote_h3`… En `out`, `local` y `unknown` el extremo local es el origen; en `in`,
+  el destino. Así se agrupa por equipo de la LAN o por destino en Internet sin mirar los dos
+  extremos, y subida y bajada se separan con `direction`. Con `LOCAL_REMOTE=False` o
+  `LOCAL_NETWORKS` vacía, los campos van como en pmacct: `ip_src`/`ip_dst`, `mac_src`/`mac_dst`,
+  `port_src`/`port_dst`… y sin `direction`.
+- `STATIC_FIELDS`: campos fijos que se añaden a cada mensaje, p. ej. el `path` del nivel de
+  Insight y el id del device. Nunca sustituyen a los del mensaje.
 - La conversación en cada sentido es un mensaje distinto, como en NetFlow/IPFIX.
 
 En Kafka, http2k antepone el consumer de Kong de la `API_KEY` al topic: lo publicado en
@@ -135,7 +146,9 @@ se descarta con un `ERROR` en el log.
 ### GeoIP
 
 Con `GEOIPV2_FILE`, cada mensaje lleva el país (y, según `GEOIP_FIELDS`, el código postal y las
-coordenadas) de las dos IPs del flujo; con `GEOIP_ASN_FILE`, su sistema autónomo (número y
+coordenadas) de las dos IPs del flujo, como `local_*` y `remote_*` (`remote_country`,
+`local_lat`…; `country_ip_src`, `lat_ip_dst`… con `LOCAL_REMOTE=False`). Abajo se usan los nombres
+de pmacct, `*_ip_src`/`*_ip_dst`; con `GEOIP_ASN_FILE`, su sistema autónomo (número y
 organización, p. ej. `15169` / `Google LLC`). GeoLite2-City incluye todo lo de GeoLite2-Country,
 así que basta con City y ASN. La base de datos no va en la imagen: GeoLite2 es gratuita
 pero su licencia no permite redistribuirla, así que cada despliegue la descarga con su propia
@@ -192,8 +205,9 @@ volumes:
   contiene el punto, no el país (para eso está `country_ip_*`). Las coordenadas de GeoIP son el
   centro aproximado de una ciudad, con errores de kilómetros, así que una resolución por encima
   de 7 da una precisión que el dato no tiene. Las IPs sin coordenadas (`0, 0`) no llevan celdas.
-- **IPs locales**: con `LOCAL_NETWORKS`, las IPs de las redes locales reciben en los campos que
-  GeoIP deja vacíos los datos de la sede: país, AS de su salida a Internet y, con `coords` y
+- **IPs locales**: las IPs de `LOCAL_NETWORKS` reciben en los campos que GeoIP deja vacíos los
+  datos de la sede, así que los `local_*` de GeoIP dicen dónde está la sonda, aproximadamente,
+  aunque Insight no lo sepa: país, AS de su salida a Internet y, con `coords` y
   `city`, sus coordenadas (y con ellas sus celdas H3), ciudad y región. Se toman de `LOCAL_COUNTRY`, `LOCAL_ASN`, `LOCAL_AS_ORG`, `LOCAL_COORDS`,
   `LOCAL_CITY` y `LOCAL_REGION` y, para lo que no esté definido, de ipinfo.io, que localiza la IP
   pública con la que sale la sonda. La ciudad y la región no se toman de ipinfo.io sino de la base
@@ -229,9 +243,12 @@ se definen; si se definen vacías, se desactiva lo que hacen.
 | `EVENT_SOURCE` | `pmacct` | Valor del campo `event_source`. *Vacía desactiva* |
 | `EVENT_TYPE` | `pmacct_flow` | Valor del campo `event_type`, en lugar de `purge`. *Vacía desactiva* |
 | `OVERRIDE_PREFIX` | `pmacct_` | Prefijo con el que se conserva un campo que se sustituye (`event_type` → `pmacct_event_type`; también `l7_protocol`, `application`, `application_category` e `ip_owner` si ya venían). *Vacía desactiva* |
-| `LOCAL_NETWORKS` | `""` | Redes locales separadas por comas (IPv4 o IPv6), p. ej. `192.168.102.0/24,10.0.0.0/8`. Activa el campo `direction` |
-| `LOCAL_MULTICAST` | `True` | Con `LOCAL_NETWORKS`, cuenta como `local` el tráfico hacia multicast y broadcast y el IPv6 link-local |
-| `NET_FIELDS` | `False` | Con `LOCAL_NETWORKS`, añade `net_src` y `net_dst`: la red local de cada extremo, o `0.0.0.0` si es externo |
+| `LOCAL_NETWORKS` | `10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7` | Redes locales separadas por comas (IPv4 o IPv6), p. ej. `192.168.102.0/24,10.0.0.0/8`. Activa `direction` y los nombres `local_*`/`remote_*`. Por defecto, los rangos privados, que son las redes locales de la mayoría de las sedes; una LAN con direcciones públicas o CGNAT (`100.64.0.0/10`) se define aquí. *Vacía desactiva* |
+| `LOCAL_MULTICAST` | `True` | Con `LOCAL_NETWORKS`, cuenta como `local` el tráfico hacia multicast y broadcast desde una red local o desde una dirección sin asignar (`0.0.0.0`, `::`: DHCP, detección de dirección duplicada de IPv6, consultas IGMP) y el IPv6 link-local |
+| `LOCAL_REMOTE` | `True` | Con `LOCAL_NETWORKS`, nombra los campos de cada extremo `local_*`/`remote_*` en lugar de `*_src`/`*_dst` (ver *Mensajes publicados*) |
+| `EXCLUDE_LOCAL_TRAFFIC` | `False` | Con `LOCAL_NETWORKS`, deja fuera de la captura el tráfico que `direction` llamaría `local`: entre redes locales y, con `LOCAL_MULTICAST`, hacia multicast y broadcast y el IPv6 link-local. Se aplica en el filtro de captura, junto con `PCAP_FILTER` |
+| `STATIC_FIELDS` | `""` | Objeto JSON con campos que se añaden a cada mensaje, p. ej. `{"path": ["org.sede"], "insight_device_id": 7}`. Nunca sustituyen a los del mensaje |
+| `NET_FIELDS` | `False` | Con `LOCAL_NETWORKS`, añade la red local de cada extremo, o `0.0.0.0` si es externo: `local_net`/`remote_net` (`net_src`/`net_dst` con `LOCAL_REMOTE=False`) |
 | `CLASSIFIER_NUM_ROOTS` | `512` | nDPI: buckets de la tabla hash de flujos. Más buckets, más memoria al arrancar y búsquedas más rápidas |
 | `CLASSIFIER_MAX_FLOWS` | `200000` | nDPI: máximo de flujos simultáneos en seguimiento (pmacct, sin definir, permite 200 millones) |
 | `CLASSIFIER_PROTO_GUESS` | `True` | nDPI: si no identifica un flujo, intenta deducir la aplicación por puertos y protocolo |
@@ -270,10 +287,13 @@ Con las variables del ejemplo de ejecución, pyflow genera en `CONFIG_DIR`:
 - `pmacctd.conf`: captura, clasificación y el plugin `http` (instancia `wdp`).
 - `pretag.map`: con `LOCAL_NETWORKS`, las reglas que ponen `direction`. Se aplica la primera
   que coincide: `local` (origen y destino locales), `out` (origen local) e `in` (destino local).
-  El valor viaja como etiqueta de pmacct y el plugin lo saca al primer nivel del mensaje.
-- `networks.lst`: con `NET_FIELDS`, las redes locales para `net_src` y `net_dst`.
+  El valor viaja como etiqueta de pmacct y el plugin lo saca al primer nivel del mensaje. Lo que
+  no coincide con ninguna sale como `unknown`, con el origen como extremo local.
+- `networks.lst`: con `NET_FIELDS`, las redes locales para `local_net` y `remote_net`.
 - `pcap_interfaces.map`: con varias interfaces en `PCAP_INTERFACE`.
+- `static_fields.json`: con `STATIC_FIELDS`.
 
-Si el tráfico capturado llega con etiqueta VLAN, los filtros de `pretag.map` (`src net …`) no
-lo reconocen. En ese caso hay que escribir las reglas a mano y pasar la configuración completa
-con `PMACCTD_CONFIG_FILE`.
+Un `unknown` con volumen indica que `LOCAL_NETWORKS` no describe la red capturada: redes que
+faltan, o tráfico que llega con etiqueta VLAN, que los filtros de `pretag.map` (`src net …`) no
+reconocen y deja todo, Internet incluido, como `unknown`. Con VLAN hay que escribir las reglas a
+mano y pasar la configuración completa con `PMACCTD_CONFIG_FILE`.

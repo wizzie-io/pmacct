@@ -1,4 +1,4 @@
-import ipaddress, logging, os, re, threading
+import ipaddress, json, logging, os, re, threading
 from wizzie.geoip import GEOIP_PRIMITIVES
 
 
@@ -23,10 +23,10 @@ class Configuration:
     _OPTIONAL_KEYS = {"http_endpoint", "api_key", "pcap_interface", "pcap_savefile", "pmacctd_config_file", "pcap_filter",
                       "local_networks", "cache_entries", "geoipv2_file", "geoip_asn_file", "extra_config",
                       "local_country", "local_asn", "local_as_org", "local_coords", "local_city", "local_region",
-                      "local_ip", "ipinfo_token"}
+                      "local_ip", "ipinfo_token", "static_fields"}
     # Keys an empty value disables instead of taking the default
     _EMPTY_DISABLES = {"history_roundoff", "timestamp_field", "event_source", "event_type", "override_prefix", "geoip_fields",
-                       "h3_resolution"}
+                       "h3_resolution", "local_networks"}
     # Keys whose value is never written to the log
     _SECRET_KEYS = {"api_key", "ipinfo_token"}
 
@@ -59,8 +59,13 @@ class Configuration:
             "event_source": "pmacct",
             "event_type": "pmacct_flow",
             "override_prefix": "pmacct_",
-            "local_networks": None,  # comma separated: enables 'direction'
+            # comma separated: enables 'direction' and the local_*/remote_* names. By default the private ranges, the
+            # local networks of most sites; empty disables both
+            "local_networks": "10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7",
             "local_multicast": "True",
+            "local_remote": "True",  # with LOCAL_NETWORKS, the fields of each end named local_*/remote_* instead of *_src/*_dst
+            "exclude_local_traffic": "False",  # leave out of the capture the traffic 'direction' would call local
+            "static_fields": None,  # JSON object: fields added to every message (ie. path, insight_device_id, metric)
             "net_fields": "False",
             "classifier_num_roots": "512",
             "classifier_max_flows": "200000",
@@ -163,6 +168,18 @@ class Configuration:
                 ipaddress.ip_address(self.config["local_ip"])
             except ValueError:
                 raise ConfigError(f"LOCAL_IP \"{self.config['local_ip']}\" is not an IP address")
+        if self.config["static_fields"]:
+            try:
+                static_fields = json.loads(self.config["static_fields"])
+            except ValueError as e:
+                raise ConfigError(f"STATIC_FIELDS is not valid JSON: {e}")
+            if not isinstance(static_fields, dict):
+                raise ConfigError("STATIC_FIELDS is not valid, expected a JSON object")
+        for net in self.items("local_networks"):
+            try:
+                ipaddress.ip_network(net, strict=False)
+            except ValueError:
+                raise ConfigError(f"LOCAL_NETWORKS \"{net}\" is not a network")
         if self.config["geoipv2_check_seconds"] == "0":
             raise ConfigError("GEOIPV2_CHECK_SECONDS must be at least 1")
         for key in self.config:

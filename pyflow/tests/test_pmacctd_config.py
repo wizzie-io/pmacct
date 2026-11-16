@@ -34,7 +34,48 @@ class PmacctdConfigTest(unittest.TestCase):
         self.assertIn("http_topic[wdp]: pmacct", lines)
         self.assertIn("http_event_type[wdp]: pmacct_flow", lines)
         self.assertIn("http_class_split[wdp]: true", lines)
-        self.assertNotIn("pre_tag_map", "\n".join(lines))
+        # LOCAL_NETWORKS defaults to the private ranges: direction and local_*/remote_* out of the box
+        self.assertIn("http_local_remote[wdp]: true", lines)
+        self.assertIn("http_label_flatten[wdp]: true", lines)
+        self.assertNotIn("http_static_fields_file", "\n".join(lines))
+        self.assertNotIn("http_local_networks", "\n".join(lines), "no GeoIP databases, nothing known about the site")
+
+    def test_default_local_networks(self):
+        pretag = self.render()["pretag.map"].splitlines()
+        self.assertEqual(pretag[-1], "set_label=direction%in     filter='dst net 10.0.0.0/8 or dst net 172.16.0.0/12 or "
+                         "dst net 192.168.0.0/16 or dst net fc00::/7'")
+
+    def test_local_networks_empty_disables(self):
+        files = self.render(LOCAL_NETWORKS="")
+        self.assertNotIn("pretag.map", files)
+        for key in ("pre_tag_map", "http_label_flatten", "http_local_remote"):
+            self.assertNotIn(key, files["pmacctd.conf"])
+        with self.assertRaises(ConfigError):
+            Configuration(dict(BASE, LOCAL_NETWORKS="192.168.102.0/24, lan"))
+
+    def test_local_remote_off(self):
+        conf = self.render(LOCAL_REMOTE="False")["pmacctd.conf"]
+        self.assertNotIn("http_local_remote", conf)
+        self.assertIn("http_label_flatten[wdp]: true", conf, "direction is still there")
+
+    def test_static_fields(self):
+        files = self.render(STATIC_FIELDS='{"path": ["org.site"], "insight_device_id": 7, "metric": ["bytes", "packets"]}')
+        self.assertEqual(files["static_fields.json"],
+                         '{"path": ["org.site"], "insight_device_id": 7, "metric": ["bytes", "packets"]}\n')
+        self.assertIn(f"http_static_fields_file[wdp]: {os.path.join(self.dir.name, 'static_fields.json')}\n", files["pmacctd.conf"])
+        for wrong in ("{not json", '["org.site"]'):
+            with self.assertRaises(ConfigError):
+                Configuration(dict(BASE, STATIC_FIELDS=wrong))
+
+    def test_exclude_local_traffic(self):
+        lines = self.lines(LOCAL_NETWORKS="192.168.102.0/24", EXCLUDE_LOCAL_TRAFFIC="True", PCAP_FILTER="not port 22")
+        self.assertIn("pcap_filter: (not port 22) and not (((src net 192.168.102.0/24 or src host 0.0.0.0 or src host ::) and "
+                      "(dst net 192.168.102.0/24 or dst net 224.0.0.0/4 or dst host 255.255.255.255 or dst net ff00::/8)) or "
+                      "(ip6 and src net fe80::/10)) and not ((host 192.168.102.9) and tcp port 8880)", lines)
+        lines = self.lines(LOCAL_NETWORKS="192.168.102.0/24", EXCLUDE_LOCAL_TRAFFIC="True", LOCAL_MULTICAST="False",
+                           PCAP_EXCLUDE_ENDPOINT="False")
+        self.assertIn("pcap_filter: not ((src net 192.168.102.0/24) and (dst net 192.168.102.0/24))", lines)
+        self.assertIn("pcap_filter: not ((host 192.168.102.9) and tcp port 8880)", self.lines(), "off by default")
 
     def test_empty_disables(self):
         lines = "\n".join(self.lines(EVENT_TYPE="", OVERRIDE_PREFIX="", HISTORY_ROUNDOFF=""))
@@ -48,7 +89,8 @@ class PmacctdConfigTest(unittest.TestCase):
     def test_local_networks(self):
         files = self.render(LOCAL_NETWORKS="192.168.102.0/24, 10.0.0.0/8")
         pretag = files["pretag.map"].splitlines()
-        self.assertEqual(pretag[2], "set_label=direction%local  filter='(src net 192.168.102.0/24 or src net 10.0.0.0/8) and "
+        self.assertEqual(pretag[2], "set_label=direction%local  filter='(src net 192.168.102.0/24 or src net 10.0.0.0/8 or "
+                         "src host 0.0.0.0 or src host ::) and "
                          "(dst net 192.168.102.0/24 or dst net 10.0.0.0/8 or dst net 224.0.0.0/4 or dst host 255.255.255.255 "
                          "or dst net ff00::/8)'")
         self.assertEqual(pretag[-1], "set_label=direction%in     filter='dst net 192.168.102.0/24 or dst net 10.0.0.0/8'")
@@ -56,6 +98,8 @@ class PmacctdConfigTest(unittest.TestCase):
         self.assertIn(", label\n", conf)
         self.assertIn("http_label_flatten[wdp]: true", conf)
         self.assertNotIn("networks.lst", files)
+        pretag = self.render(LOCAL_NETWORKS="10.0.0.0/8", LOCAL_MULTICAST="False")["pretag.map"].splitlines()
+        self.assertEqual(pretag[2], "set_label=direction%local  filter='(src net 10.0.0.0/8) and (dst net 10.0.0.0/8)'")
 
     def test_net_fields(self):
         files = self.render(LOCAL_NETWORKS="10.0.0.0/8", NET_FIELDS="True", LOCAL_MULTICAST="False")
@@ -169,7 +213,7 @@ class PmacctdConfigTest(unittest.TestCase):
     def test_local_geo_only_fields_in_use(self):
         values, calls, _ = self.resolve(LOCAL_NETWORKS="10.0.0.0/8", GEOIPV2_FILE="/g/city.mmdb")
         self.assertEqual(values, {"country": "ES"})
-        values, calls, _ = self.resolve(GEOIPV2_FILE="/g/city.mmdb")  # no LOCAL_NETWORKS
+        values, calls, _ = self.resolve(LOCAL_NETWORKS="", GEOIPV2_FILE="/g/city.mmdb")  # no LOCAL_NETWORKS
         self.assertEqual((values, calls), ({}, []))
 
     def test_h3(self):
@@ -208,7 +252,7 @@ class PmacctdConfigTest(unittest.TestCase):
         self.assertIn("http_local_country[wdp]: ES", lines)
         self.assertIn("http_local_as_org[wdp]: TELEFONICA", lines)
         self.assertNotIn("http_local_coords", "\n".join(lines))
-        self.assertNotIn("http_local", self.render(**self.GEO)["pmacctd.conf"])  # nothing known, nothing written
+        self.assertNotIn("http_local_networks", self.render(**self.GEO)["pmacctd.conf"])  # nothing known, nothing written
         with self.assertRaises(ConfigError):
             Configuration(dict(BASE, LOCAL_COORDS="here"))
 
