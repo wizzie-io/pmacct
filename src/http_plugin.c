@@ -42,6 +42,7 @@ char default_http_apikey_header[] = "apikey";
 char default_http_geoip_lang[] = "en";
 
 static void p_http_local_init(void);
+static void p_http_static_init(void);
 #if defined (WITH_GEOIPV2)
 static void p_http_mmdb_check(const char *, const char *, const char *);
 #endif
@@ -60,6 +61,9 @@ static void p_http_mmdb_check(const char *, const char *, const char *);
 #if defined (WITH_H3)
 static int h3_resolution = -1;
 #endif
+
+/* fields of http_static_fields_file, added to every data message */
+static json_t *static_fields;
 
 /* Functions */
 void http_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
@@ -140,6 +144,7 @@ void http_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 #endif
 
   p_http_local_init();
+  p_http_static_init();
 
   if (config.http_h3_resolution) {
 #if defined (WITH_H3)
@@ -790,6 +795,32 @@ static void p_http_local_geo(json_t *obj, struct host_addr *addr, const char *en
   }
 }
 
+/* read once in the plugin process; the purge writers inherit it. A missing or
+   wrong file leaves the messages without static fields, the plugin goes on */
+static void p_http_static_init(void)
+{
+  json_error_t error;
+  json_t *fields;
+
+  if (!config.http_static_fields_file) return;
+
+  fields = json_load_file(config.http_static_fields_file, 0, &error);
+
+  if (!fields) {
+    Log(LOG_WARNING, "WARN ( %s/%s ): 'http_static_fields_file': %s (line %d); no static fields.\n", config.name, config.type, error.text, error.line);
+    return;
+  }
+
+  if (!json_is_object(fields)) {
+    Log(LOG_WARNING, "WARN ( %s/%s ): 'http_static_fields_file' is not a JSON object; no static fields.\n", config.name, config.type);
+    json_decref(fields);
+    return;
+  }
+
+  static_fields = fields;
+  Log(LOG_INFO, "INFO ( %s/%s ): 'http_static_fields_file': %zu static fields.\n", config.name, config.type, json_object_size(static_fields));
+}
+
 #if defined (WITH_H3)
 static void p_http_h3_cell(json_t *obj, const LatLng *point, int res, const char *prefix, const char *end)
 {
@@ -1035,6 +1066,9 @@ void http_cache_purge(struct chained_cache *queue[], int index, int safe_action)
       p_http_h3(json_obj, "dst");
     }
 #endif
+
+    /* last, so they never override what the message already has */
+    if (static_fields) json_object_update_missing(json_obj, static_fields);
 
     json_str = p_http_json_str(json_obj);
 

@@ -209,6 +209,7 @@ struct configuration {
   char *http_local_region;
   char *http_local_ip;
   char *http_h3_resolution;
+  char *http_static_fields_file;
   char *kafka_writer_id;
   int print_cache_entries;
   int print_markers;

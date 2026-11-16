@@ -450,6 +450,53 @@ def case_h3(binary, workdir):
         ep.stop()
 
 
+def case_static_fields(binary, workdir):
+    '''http_static_fields_file adds its fields to every data message, never to the markers, and
+    never overrides what the message has'''
+    fields = os.path.join(workdir, "static.json")
+    with open(fields, "w") as f:
+        json.dump({"path": ["org.site"], "insight_device_id": 7, "metric": ["bytes", "packets"],
+                   "ip_src": "not me"}, f)
+    ep = Endpoint(200)
+    try:
+        log = run_flows(binary, workdir, ep, 3, "http_apikey[t]: %s" % APIKEY, "http_static_fields_file[t]: %s" % fields,
+                        "http_markers[t]: true")
+        events = [m.get("event_type") for m in ep.messages()]
+        check("purge_init" in events and "purge_close" in events, "markers delivered")
+        markers = [m for m in ep.messages() if m.get("event_type") in ("purge_init", "purge_close")]
+        check(all("path" not in m and "metric" not in m for m in markers), "markers get no static fields, got %r" % markers)
+        msgs = [m for m in ep.messages() if m.get("event_type") not in ("purge_init", "purge_close")]
+        check(len(msgs) == 3, "3 messages received, got %d" % len(msgs))
+        check(all(m.get("path") == ["org.site"] and m.get("insight_device_id") == 7 and
+                  m.get("metric") == ["bytes", "packets"] for m in msgs), "static fields in every message, got %r" % msgs)
+        check(sorted(m["ip_src"] for m in msgs) == ["10.0.0.1", "10.0.0.2", "10.0.0.3"],
+              "static fields never override the message ones")
+        check(re.search(r"'http_static_fields_file': 4 static fields", log), "INFO with the number of static fields")
+        check(not re.search(r"WARN|ERROR", log), "no WARN/ERROR in the log")
+    finally:
+        ep.stop()
+
+
+def case_static_fields_invalid(binary, workdir):
+    '''http_static_fields_file missing, invalid or not an object: a warning, messages delivered
+    without static fields'''
+    wrong = os.path.join(workdir, "wrong.json")
+    for content in (None, "{not json", "[1, 2]"):
+        if content is not None:
+            with open(wrong, "w") as f:
+                f.write(content)
+        elif os.path.exists(wrong):
+            os.remove(wrong)
+        ep = Endpoint(200)
+        try:
+            log = run_flows(binary, workdir, ep, 1, "http_apikey[t]: %s" % APIKEY, "http_static_fields_file[t]: %s" % wrong)
+            msgs = ep.messages()
+            check(len(msgs) == 1 and "path" not in msgs[0], "%r: message delivered without static fields" % content)
+            check(re.search(r"WARN .*'http_static_fields_file'.*no static fields", log), "%r: WARN in the log" % content)
+        finally:
+            ep.stop()
+
+
 def case_retry_5xx(binary, workdir):
     '''5xx is retried http_retries times, then the batch is dropped with an ERROR'''
     ep = Endpoint(500)

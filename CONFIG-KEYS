@@ -1049,6 +1049,14 @@ DESC:		If pmacct is compiled with --enable-h3 (Uber's H3, https://h3geo.org), ea
 		no cells. Without --enable-h3 a warning is logged and the knob is ignored.
 DEFAULT:	none
 
+KEY:		http_static_fields_file
+DESC:		Full pathname to a file with a JSON object (ie. {"path": ["org.site"], "device_id": 7}):
+		its fields are added to every data message, never to the purge_init/purge_close
+		markers. They never override fields already in the message. The file is read once,
+		when the plugin starts. A missing file, invalid JSON or anything but an object logs
+		a warning and the messages go without static fields.
+DEFAULT:	none
+
 KEY:		http_local_networks
 DESC:		Comma separated list of networks (IPv4 or IPv6, ie. "192.168.102.0/24, fd00::/8") where
 		the probe is. GeoIP databases don't know private addresses, so for an address in these
