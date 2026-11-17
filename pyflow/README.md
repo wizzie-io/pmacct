@@ -288,7 +288,9 @@ Con las variables del ejemplo de ejecución, pyflow genera en `CONFIG_DIR`:
 - `pretag.map`: con `LOCAL_NETWORKS`, las reglas que ponen `direction`. Se aplica la primera
   que coincide: `local` (origen y destino locales), `out` (origen local) e `in` (destino local).
   El valor viaja como etiqueta de pmacct y el plugin lo saca al primer nivel del mensaje. Lo que
-  no coincide con ninguna sale como `unknown`, con el origen como extremo local.
+  no coincide con ninguna sale como `unknown`, con el origen como extremo local. Sus filtros BPF
+  crecen con cada red, así que `pmacctd.conf` lleva `maps_row_len` con sitio para la regla más
+  larga (pmacct ignora, con un `WARN`, las líneas de más de 288 caracteres).
 - `networks.lst`: con `NET_FIELDS`, las redes locales para `local_net` y `remote_net`.
 - `pcap_interfaces.map`: con varias interfaces en `PCAP_INTERFACE`.
 - `static_fields.json`: con `STATIC_FIELDS`.

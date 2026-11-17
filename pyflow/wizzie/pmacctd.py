@@ -6,6 +6,9 @@ from wizzie.geoip import GEOIP_PRIMITIVES
 from wizzie import localgeo
 
 PLUGIN = "wdp"  # plugin instance name, shows in the logs and in writer_id
+# maps_row_len for pretag.map: pmacct ignores longer lines (its default, 256 plus a margin, is too short
+# for the BPF filters of several LOCAL_NETWORKS)
+MAPS_ROW_LEN = 1024
 # pmacctd.conf line that holds the API key, as it is written to the log
 APIKEY_LINE = re.compile(r"^(http_apikey\[[^]]*\]:).*$", re.M)
 
@@ -102,7 +105,9 @@ class PmacctdConfig:
         lines.append(f"snaplen: {c['snaplen']}")
 
         if local_networks:
-            lines += [f"pre_tag_map: {self.pretag_file}", "pre_tag_label_encode_as_map: true"]
+            longest = max(len(rule) for rule in files[self.pretag_file].splitlines())
+            lines += [f"pre_tag_map: {self.pretag_file}", "pre_tag_label_encode_as_map: true",
+                      f"maps_row_len: {max(MAPS_ROW_LEN, longest + 2)}"]
             if self.conf.is_true("net_fields"):
                 lines.append(f"networks_file: {self.networks_file}")
         if c["geoipv2_file"]:

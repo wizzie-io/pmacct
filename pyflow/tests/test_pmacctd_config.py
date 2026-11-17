@@ -45,10 +45,21 @@ class PmacctdConfigTest(unittest.TestCase):
         self.assertEqual(pretag[-1], "set_label=direction%in     filter='dst net 10.0.0.0/8 or dst net 172.16.0.0/12 or "
                          "dst net 192.168.0.0/16 or dst net fc00::/7'")
 
+    def test_maps_row_len(self):
+        '''pmacct ignores pretag.map lines longer than maps_row_len (288 by default): the local rule of
+        the default LOCAL_NETWORKS is longer'''
+        for env in ({}, {"LOCAL_NETWORKS": ", ".join(f"10.{i}.0.0/16" for i in range(40))}):
+            files = self.render(**env)
+            longest = max(len(line) for line in files["pretag.map"].splitlines())
+            row_len = [int(line.split(":")[1]) for line in files["pmacctd.conf"].splitlines() if line.startswith("maps_row_len:")]
+            self.assertEqual(len(row_len), 1)
+            self.assertGreater(row_len[0], longest + 1, "room for the line, its newline and the final NUL")
+        self.assertGreater(longest, 1024, "40 networks need more than the minimum")
+
     def test_local_networks_empty_disables(self):
         files = self.render(LOCAL_NETWORKS="")
         self.assertNotIn("pretag.map", files)
-        for key in ("pre_tag_map", "http_label_flatten", "http_local_remote"):
+        for key in ("pre_tag_map", "maps_row_len", "http_label_flatten", "http_local_remote"):
             self.assertNotIn(key, files["pmacctd.conf"])
         with self.assertRaises(ConfigError):
             Configuration(dict(BASE, LOCAL_NETWORKS="192.168.102.0/24, lan"))
