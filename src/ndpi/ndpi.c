@@ -99,7 +99,7 @@ struct pm_ndpi_flow_info *pm_ndpi_get_flow_info(struct pm_ndpi_workflow *workflo
     if ((((struct pm_iphdr *)pptrs->iph_ptr)->ip_off & htons(IP_OFFMASK))) {
       if (!log_notification_isset(&log_notifications.ndpi_tmp_frag_warn, pptrs->pkthdr->ts.tv_sec)) {
         Log(LOG_WARNING, "WARN ( %s/core ): nDPI support for fragmented traffic not implemented. %s: %s\n", config.name, GET_IN_TOUCH_MSG, MANTAINER);
-        log_notification_set(&log_notifications.ndpi_cache_full, pptrs->pkthdr->ts.tv_sec, 180);
+        log_notification_set(&log_notifications.ndpi_tmp_frag_warn, pptrs->pkthdr->ts.tv_sec, 180);
       }
 
       if (pptrs->frag_first_found) {
