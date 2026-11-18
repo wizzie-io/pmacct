@@ -91,6 +91,11 @@ static const struct p_http_end_field end_fields[] = {
   {NULL, NULL}
 };
 
+/* http_ephemeral_ports: ports from this one up are published as "ephemeral"
+   (0: the knob is off, ports keep their number) */
+static int ephemeral_port_min;
+#define HTTP_EPHEMERAL_PORT "ephemeral"
+
 /* 'direction' of the data no label rule matches */
 #define HTTP_DIRECTION_UNKNOWN "unknown"
 
@@ -197,6 +202,34 @@ void http_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 #else
     Log(LOG_WARNING, "WARN ( %s/%s ): 'http_h3_resolution' requires H3 support (--enable-h3); ignored.\n", config.name, config.type);
 #endif
+  }
+
+  if (config.http_tos_split) {
+    if (!(config.what_to_count & COUNT_IP_TOS)) {
+      Log(LOG_WARNING, "WARN ( %s/%s ): 'http_tos_split' needs tos in the aggregation method.\n", config.name, config.type);
+    }
+    else if (config.tos_encode_as_dscp) {
+      Log(LOG_WARNING, "WARN ( %s/%s ): 'http_tos_split' with 'tos_encode_as_dscp': tos carries no ECN bits, only dscp is published.\n", config.name, config.type);
+    }
+  }
+
+  if (config.http_tcp_flags_names) {
+    if (!(config.what_to_count & COUNT_TCPFLAGS)) {
+      Log(LOG_WARNING, "WARN ( %s/%s ): 'http_tcp_flags_names' needs tcpflags in the aggregation method.\n", config.name, config.type);
+    }
+    else if (config.tcpflags_encode_as_array) {
+      Log(LOG_WARNING, "WARN ( %s/%s ): 'http_tcp_flags_names' and 'tcpflags_encode_as_array' do not go together; tcp_flags is left as an array.\n", config.name, config.type);
+    }
+  }
+
+  if (config.http_ephemeral_ports) {
+    char *endptr;
+    long port = strtol(config.http_ephemeral_ports, &endptr, 10);
+
+    if (*endptr || port < 1 || port > 65535) {
+      Log(LOG_WARNING, "WARN ( %s/%s ): 'http_ephemeral_ports' must be 1 to 65535; ports keep their number.\n", config.name, config.type);
+    }
+    else ephemeral_port_min = port;
   }
 
 #if !defined (WITH_NDPI)
@@ -558,6 +591,106 @@ static void p_http_override(json_t *obj, const char *key, json_t *value)
   }
 
   json_object_set_new(obj, key, value);
+}
+
+/* http_tos_split: the DSCP (upper 6 bits of tos) by its standard name, or its
+   number when it has none, and the ECN codepoint (lower 2 bits). With
+   tos_encode_as_dscp, tos is already the DSCP and carries no ECN */
+static const char *p_http_dscp_name(int dscp)
+{
+  switch (dscp) {
+  case 0: return "BE";
+  case 1: return "LE";
+  case 8: return "CS1";
+  case 10: return "AF11";
+  case 12: return "AF12";
+  case 14: return "AF13";
+  case 16: return "CS2";
+  case 18: return "AF21";
+  case 20: return "AF22";
+  case 22: return "AF23";
+  case 24: return "CS3";
+  case 26: return "AF31";
+  case 28: return "AF32";
+  case 30: return "AF33";
+  case 32: return "CS4";
+  case 34: return "AF41";
+  case 36: return "AF42";
+  case 38: return "AF43";
+  case 40: return "CS5";
+  case 44: return "VA";
+  case 46: return "EF";
+  case 48: return "CS6";
+  case 56: return "CS7";
+  default: return NULL;
+  }
+}
+
+static void p_http_tos_split(json_t *obj)
+{
+  static const char *ecn_names[] = {"Not-ECT", "ECT(1)", "ECT(0)", "CE"};
+  json_t *tos = json_object_get(obj, "tos");
+  const char *name;
+  char number[12];
+  int value, dscp;
+
+  if (!json_is_integer(tos)) return;
+
+  value = json_integer_value(tos) & 0xff;
+  dscp = config.tos_encode_as_dscp ? (value & 0x3f) : (value >> 2);
+
+  if (!(name = p_http_dscp_name(dscp))) {
+    snprintf(number, sizeof(number), "%d", dscp);
+    name = number;
+  }
+
+  json_object_set_new(obj, "dscp", json_string(name));
+  if (!config.tos_encode_as_dscp) json_object_set_new(obj, "ecn", json_string(ecn_names[value & 0x3]));
+}
+
+/* http_tcp_flags_names: "tcp_flags" from the decimal byte ("17") to the names
+   of its flags in bit order ("FIN,ACK"); with no flag (UDP, ICMP) it goes */
+static void p_http_tcp_flags_names(json_t *obj)
+{
+  static const char *flag_names[] = {"FIN", "SYN", "RST", "PSH", "ACK", "URG", "ECE", "CWR"};
+  json_t *flags = json_object_get(obj, "tcp_flags");
+  char names[64];
+  unsigned long value;
+  size_t len = 0;
+  int bit;
+
+  if (!json_is_string(flags)) return;
+
+  value = strtoul(json_string_value(flags), NULL, 10) & 0xff;
+  if (!value) {
+    json_object_del(obj, "tcp_flags");
+    return;
+  }
+
+  names[0] = '\0';
+  for (bit = 0; bit < 8; bit++) {
+    if (value & (1 << bit)) len += snprintf(names + len, sizeof(names) - len, "%s%s", len ? "," : "", flag_names[bit]);
+  }
+
+  json_object_set_new(obj, "tcp_flags", json_string(names));
+}
+
+/* http_ephemeral_ports: the port as text, "ephemeral" from ephemeral_port_min
+   up, so the same field never mixes numbers and text */
+static void p_http_ephemeral_port(json_t *obj, const char *key)
+{
+  json_t *port = json_object_get(obj, key);
+  char number[12];
+
+  if (!json_is_integer(port)) return;
+
+  if (json_integer_value(port) >= ephemeral_port_min) {
+    json_object_set_new(obj, key, json_string(HTTP_EPHEMERAL_PORT));
+  }
+  else {
+    snprintf(number, sizeof(number), "%d", (int) json_integer_value(port));
+    json_object_set_new(obj, key, json_string(number));
+  }
 }
 
 #if defined (WITH_GEOIPV2)
@@ -1096,6 +1229,16 @@ void http_cache_purge(struct chained_cache *queue[], int index, int safe_action)
         p_http_override(json_obj, "l7_protocol", json_string((master[0] && strcasecmp(master, "Unknown")) ? master : app));
         p_http_override(json_obj, "application", json_string(app));
       }
+    }
+
+    /* rewritten in place, never kept with http_override_prefix: it is the same
+       value written another way, and a kept "*_src"/"*_dst" port would break
+       the local/remote shape of the message */
+    if (config.http_tos_split) p_http_tos_split(json_obj);
+    if (config.http_tcp_flags_names && !config.tcpflags_encode_as_array) p_http_tcp_flags_names(json_obj);
+    if (ephemeral_port_min) {
+      p_http_ephemeral_port(json_obj, "port_src");
+      p_http_ephemeral_port(json_obj, "port_dst");
     }
 
 #if defined (WITH_NDPI)

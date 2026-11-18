@@ -1064,6 +1064,33 @@ DESC:		Names the fields of each end of the flow after where it is, local or remo
 		top level of the message; otherwise a warning is logged and every message is "unknown".
 DEFAULT:	false
 
+KEY:		http_tos_split
+VALUES:		[ true | false ]
+DESC:		With 'tos' in the aggregation method, adds two fields out of it: 'dscp', the upper 6
+		bits by their standard name ("BE", "LE", "CS1".."CS7", "AF11".."AF43", "VA", "EF") or,
+		with no name, the number as text, ie. "5"; and 'ecn', the lower 2 bits: "Not-ECT",
+		"ECT(1)", "ECT(0)" or "CE". The 'tos' field is left in place. With tos_encode_as_dscp
+		tos carries no ECN bits: a warning is logged and only 'dscp' is added.
+DEFAULT:	false
+
+KEY:		http_tcp_flags_names
+VALUES:		[ true | false ]
+DESC:		With 'tcpflags' in the aggregation method, 'tcp_flags' goes from the flags byte in
+		decimal, ie. "17", to the names of its flags in bit order, comma separated: "FIN,ACK".
+		Names are FIN, SYN, RST, PSH, ACK, URG, ECE and CWR. With no flag set (ie. UDP, ICMP)
+		the field is dropped. Not compatible with tcpflags_encode_as_array, which is kept.
+DEFAULT:	false
+
+KEY:		http_ephemeral_ports
+DESC:		Port number from which source and destination ports are published as "ephemeral"
+		instead of their number, ie. 32768 (the ephemeral range of Linux; Windows and macOS
+		start at 49152). Flows of clients to the same service then aggregate in one message
+		downstream. When set, 'port_src' and 'port_dst' (or 'local_port' and 'remote_port'
+		with http_local_remote) are always text, ie. "443" or "ephemeral", so that a field
+		never mixes numbers and text. Out of 1 to 65535 a warning is logged and ports keep
+		their number.
+DEFAULT:	none
+
 KEY:		http_static_fields_file
 DESC:		Full pathname to a file with a JSON object (ie. {"path": ["org.site"], "device_id": 7}):
 		its fields are added to every data message, never to the purge_init/purge_close

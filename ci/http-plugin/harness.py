@@ -69,17 +69,20 @@ class Endpoint:
 
 def send_netflow_v5(n_records, flows=None):
     '''One NetFlow v5 packet with n_records TCP flows 10.0.0.x:4000x -> 10.0.1.1:443, or with
-    the given (source, destination) addresses'''
+    the given (source, destination) addresses; a third item, a dict, sets sport, dport, flags
+    and tos of that flow (by default 4000x, 443, 0x18 PSH+ACK and 0)'''
     flows = flows or [("10.0.0.%d" % (i + 1), "10.0.1.1") for i in range(n_records)]
     n_records = len(flows)
     uptime = 100000
     header = struct.pack("!HHIIIIBBH", 5, n_records, uptime, int(time.time()), 0, 1, 0, 0, 0)
     records = b""
     for i in range(n_records):
+        opts = flows[i][2] if len(flows[i]) > 2 else {}
         records += struct.pack("!4s4s4sHHIIIIHHBBBBHHBBH",
                                socket.inet_aton(flows[i][0]), socket.inet_aton(flows[i][1]),
                                socket.inet_aton("0.0.0.0"), 0, 0, 10, 1000, uptime - 5000, uptime - 1000,
-                               40000 + i, 443, 0, 0x18, 6, 0, 0, 0, 0, 0, 0)
+                               opts.get("sport", 40000 + i), opts.get("dport", 443), 0, opts.get("flags", 0x18), 6,
+                               opts.get("tos", 0), 0, 0, 0, 0, 0)
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.sendto(header + records, ("127.0.0.1", NF_PORT))
     sock.close()
@@ -493,6 +496,95 @@ def case_local_remote(binary, workdir):
         check(unknown.get("direction") == "unknown" and unknown.get("remote_ip") == "89.160.20.112" and
               unknown.get("local_asn") == 1221, "no label: unknown, source as local with its own GeoIP, got %r" % unknown)
         check(not re.search(r"WARN|ERROR", log), "no WARN/ERROR in the log")
+    finally:
+        ep.stop()
+
+
+def case_tos_split(binary, workdir):
+    '''http_tos_split adds dscp by name (or its number) and ecn out of tos, which is kept'''
+    ep = Endpoint(200)
+    try:
+        # tos: EF + Not-ECT, AF31 + ECT(0), DSCP 5 (no name) + CE, CS6 + ECT(1)
+        log = run_flows(binary, workdir, ep, 0, "http_apikey[t]: %s" % APIKEY, "http_tos_split[t]: true",
+                        aggregate=AGGREGATE + ", tos",
+                        flows=[("10.0.0.1", "10.0.1.1", {"tos": 46 << 2}), ("10.0.0.2", "10.0.1.1", {"tos": 26 << 2 | 2}),
+                               ("10.0.0.3", "10.0.1.1", {"tos": 5 << 2 | 3}), ("10.0.0.4", "10.0.1.1", {"tos": 48 << 2 | 1})])
+        msgs = {m["ip_src"]: m for m in ep.messages()}
+        check(len(msgs) == 4, "4 messages received, got %d" % len(msgs))
+        got = {ip: (m.get("dscp"), m.get("ecn"), m.get("tos")) for ip, m in msgs.items()}
+        check(got == {"10.0.0.1": ("EF", "Not-ECT", 184), "10.0.0.2": ("AF31", "ECT(0)", 106),
+                      "10.0.0.3": ("5", "CE", 23), "10.0.0.4": ("CS6", "ECT(1)", 193)},
+              "dscp, ecn and tos kept, got %r" % got)
+        check(not re.search(r"WARN|ERROR", log), "no WARN/ERROR in the log")
+    finally:
+        ep.stop()
+
+
+def case_tos_split_dscp(binary, workdir):
+    '''with tos_encode_as_dscp tos is already the DSCP: a warning and dscp only, no ecn'''
+    ep = Endpoint(200)
+    try:
+        log = run_flows(binary, workdir, ep, 0, "http_apikey[t]: %s" % APIKEY, "http_tos_split[t]: true",
+                        "tos_encode_as_dscp: true", aggregate=AGGREGATE + ", tos",
+                        flows=[("10.0.0.1", "10.0.1.1", {"tos": 46 << 2 | 3})])
+        msgs = ep.messages()
+        check(len(msgs) == 1, "1 message received, got %d" % len(msgs))
+        check(msgs[0].get("dscp") == "EF" and "ecn" not in msgs[0], "dscp EF and no ecn, got %r" % msgs[0])
+        check("tos_encode_as_dscp" in log and "only dscp" in log, "warning about tos_encode_as_dscp")
+    finally:
+        ep.stop()
+
+
+def case_tcp_flags_names(binary, workdir):
+    '''http_tcp_flags_names: tcp_flags by name in bit order; no flags, no field'''
+    ep = Endpoint(200)
+    try:
+        log = run_flows(binary, workdir, ep, 0, "http_apikey[t]: %s" % APIKEY, "http_tcp_flags_names[t]: true",
+                        aggregate=AGGREGATE + ", tcpflags",
+                        flows=[("10.0.0.1", "10.0.1.1", {"flags": 0x11}), ("10.0.0.2", "10.0.1.1", {"flags": 0x02}),
+                               ("10.0.0.3", "10.0.1.1", {"flags": 0xff}), ("10.0.0.4", "10.0.1.1", {"flags": 0})])
+        msgs = {m["ip_src"]: m for m in ep.messages()}
+        check(len(msgs) == 4, "4 messages received, got %d" % len(msgs))
+        got = {ip: m.get("tcp_flags") for ip, m in msgs.items()}
+        check(got == {"10.0.0.1": "FIN,ACK", "10.0.0.2": "SYN", "10.0.0.3": "FIN,SYN,RST,PSH,ACK,URG,ECE,CWR",
+                      "10.0.0.4": None}, "flags by name, none without flags, got %r" % got)
+        check(not re.search(r"WARN|ERROR", log), "no WARN/ERROR in the log")
+    finally:
+        ep.stop()
+
+
+def case_ephemeral_ports(binary, workdir):
+    '''http_ephemeral_ports: ports as text, "ephemeral" from the threshold up, also once
+    renamed local/remote; a wrong value warns and leaves the numbers'''
+    pretag = os.path.join(workdir, "pretag.map")
+    with open(pretag, "w") as f:
+        f.write("set_label=direction%out src_net=10.0.0.0/24\n")
+    ep = Endpoint(200)
+    try:
+        log = run_flows(binary, workdir, ep, 0, "http_apikey[t]: %s" % APIKEY, "http_ephemeral_ports[t]: 32768",
+                        "pre_tag_map: %s" % pretag, "pre_tag_label_encode_as_map: true", "http_label_flatten[t]: true",
+                        "http_local_remote[t]: true", aggregate=AGGREGATE + ", label",
+                        flows=[("10.0.0.1", "10.0.1.1", {"sport": 32767, "dport": 443}),
+                               ("10.0.0.2", "10.0.1.1", {"sport": 32768, "dport": 53}),
+                               ("10.0.0.3", "10.0.1.1", {"sport": 8080, "dport": 65535})])
+        msgs = {m["local_ip"]: m for m in ep.messages()}
+        check(len(msgs) == 3, "3 messages received, got %d" % len(msgs))
+        got = {ip: (m.get("local_port"), m.get("remote_port")) for ip, m in msgs.items()}
+        check(got == {"10.0.0.1": ("32767", "443"), "10.0.0.2": ("ephemeral", "53"),
+                      "10.0.0.3": ("8080", "ephemeral")}, "ports as text and ephemeral, got %r" % got)
+        for m in msgs.values():
+            check(not [k for k in m if k.endswith("_src") or k.endswith("_dst")], "no *_src/*_dst left, got %r" % m)
+        check(not re.search(r"WARN|ERROR", log), "no WARN/ERROR in the log")
+    finally:
+        ep.stop()
+
+    ep = Endpoint(200)
+    try:
+        log = run_flows(binary, workdir, ep, 1, "http_apikey[t]: %s" % APIKEY, "http_ephemeral_ports[t]: 70000")
+        msgs = ep.messages()
+        check(len(msgs) == 1 and msgs[0].get("port_src") == 40000 and msgs[0].get("port_dst") == 443,
+              "numbers kept with a wrong value, got %r" % msgs)
+        check("'http_ephemeral_ports' must be 1 to 65535" in log, "warning about the wrong value")
     finally:
         ep.stop()
 

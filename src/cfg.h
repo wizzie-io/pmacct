@@ -211,6 +211,9 @@ struct configuration {
   char *http_h3_resolution;
   char *http_static_fields_file;
   int http_local_remote;
+  int http_tos_split;
+  int http_tcp_flags_names;
+  char *http_ephemeral_ports;
   char *kafka_writer_id;
   int print_cache_entries;
   int print_markers;
