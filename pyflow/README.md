@@ -28,14 +28,14 @@ Cada `REFRESH_TIME` segundos se publica un mensaje por cada combinación de los 
 ```json
 {
   "event_type": "pmacct_flow", "class": "TLS/Github", "vlan": 0, "etype": "800",
-  "tcp_flags": "24", "ip_proto": "tcp", "tos": 2,
+  "tcp_flags": "PSH,ACK", "ip_proto": "tcp", "tos": 2, "dscp": "BE", "ecn": "ECT(0)",
   "stamp_inserted": "2026-10-22 15:57:00", "stamp_updated": "2026-10-22 15:58:01",
   "packets": 6, "bytes": 3941, "writer_id": "wdp/10",
   "timestamp": 1792684620, "event_source": "pmacct", "pmacct_event_type": "purge",
   "direction": "out", "l7_protocol": "TLS", "application": "Github",
   "application_category": "Collaborative", "ip_owner": "Azure",
   "local_mac": "14:98:77:39:28:b5", "remote_mac": "8c:ed:e1:14:74:4c",
-  "local_ip": "192.168.102.9", "remote_ip": "20.250.119.67", "local_port": 63979, "remote_port": 443
+  "local_ip": "192.168.102.9", "remote_ip": "20.250.119.67", "local_port": "ephemeral", "remote_port": "443"
 }
 ```
 
@@ -57,6 +57,17 @@ Cada `REFRESH_TIME` segundos se publica un mensaje por cada combinación de los 
   `Network`, `Streaming`…) y a quién asocia nDPI las IPs del flujo, independientemente del
   contenido (`AmazonAWS`, `Google`…; `Unknown` si a nadie). `ip_owner` da pistas cuando la
   aplicación no se ha identificado, p. ej. en un `Unknown/TLS` sin SNI.
+- `dscp` / `ecn` (`TOS_SPLIT`): el byte `tos` en sus dos partes. `dscp` es el marcado de QoS
+  por su nombre estándar (`BE`, `EF`, `AF11`…`AF43`, `CS1`…`CS7`, `LE`, `VA`) o, si no tiene,
+  su número como texto. `ecn` es `Not-ECT` (sin ECN), `ECT(0)`/`ECT(1)` (los extremos usan ECN)
+  o `CE` (algún router del camino marcó congestión). `tos` se conserva.
+- `tcp_flags` (`TCP_FLAGS_NAMES`): los flags TCP vistos en el intervalo, por nombre y en el orden
+  de los bits (`FIN`, `SYN`, `RST`, `PSH`, `ACK`, `URG`, `ECE`, `CWR`), p. ej. `"FIN,ACK"`; sin
+  ninguno (UDP, ICMP) el campo no va. Sin la variable, el byte en decimal (`"17"`).
+- Puertos (`EPHEMERAL_PORTS`): siempre texto, y `"ephemeral"` desde 32768, el rango efímero de
+  los clientes, para que las conexiones a un mismo servicio se agreguen aguas abajo. Los
+  servicios (`"443"`, `"53"`, `"8080"`…) conservan su número. Con la variable vacía, los puertos
+  van como números.
 - `direction`, a partir de `LOCAL_NETWORKS` (por defecto, los rangos privados): `out` (sale de
   las redes locales, subida), `in` (entra, bajada), `local` (entre redes locales, o hacia
   multicast/broadcast) o `unknown` (ninguna regla coincide: ver *Configuración generada*).
@@ -254,6 +265,9 @@ se definen; si se definen vacías, se desactiva lo que hacen.
 | `CLASSIFIER_PROTO_GUESS` | `True` | nDPI: si no identifica un flujo, intenta deducir la aplicación por puertos y protocolo |
 | `CLASS_SPLIT` | `True` | Añade `l7_protocol` y `application` a partir de `class` (ver *Mensajes publicados*). Solo con `class` en `AGGREGATE` |
 | `CLASS_DETAILS` | `True` | Añade `application_category` e `ip_owner` (ver *Mensajes publicados*). Solo con `class` en `AGGREGATE` |
+| `TOS_SPLIT` | `True` | Añade `dscp` y `ecn` a partir de `tos` (ver *Mensajes publicados*). Solo con `tos` en `AGGREGATE` |
+| `TCP_FLAGS_NAMES` | `True` | `tcp_flags` por nombre (`"FIN,ACK"`) en vez del byte en decimal. Solo con `tcpflags` en `AGGREGATE` |
+| `EPHEMERAL_PORTS` | `32768` | Puerto desde el que los puertos se publican como `"ephemeral"`; con ella, todos los puertos van como texto. Windows y macOS empiezan en 49152, así que 32768 cubre los tres. *Vacía desactiva* |
 | `GEOIPV2_FILE` | `""` | Base de datos GeoIP (`.mmdb`, MaxMind GeoLite2/GeoIP2 o DB-IP) en un volumen. Activa los campos de `GEOIP_FIELDS`; ver *GeoIP* |
 | `GEOIP_FIELDS` | `country` | Con `GEOIPV2_FILE`, campos de GeoIP separados por comas: `country` (`country_ip_src`/`_dst`), `pocode` (código postal), `coords` (`lat_ip_*`/`lon_ip_*`) y `city` (`city_ip_*` y `region_ip_*`, la ciudad y la región o comunidad autónoma, que añade el plugin http porque pmacct no tiene primitivas para ellas). `pocode`, `coords` y `city` necesitan una base de datos City. *Vacía desactiva* (las primitivas se ponen a mano en `AGGREGATE`) |
 | `H3_RESOLUTION` | `7` | Con `coords` en `GEOIP_FIELDS`, resolución (0 a 15) de las celdas H3 `h3_src`/`h3_dst` (7: unos 5 km²). Además salen `h3_city_*` (5, ~250 km²), `h3_region_*` (3, ~12.400 km²) y `h3_country_*` (2, ~87.000 km²). *Vacía desactiva*; ver *GeoIP* |

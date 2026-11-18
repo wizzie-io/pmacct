@@ -146,6 +146,12 @@ class PmacctdConfig:
             lines.append(f"http_class_split[{p}]: true")
         if self.conf.is_true("class_details"):
             lines.append(f"http_class_details[{p}]: true")
+        if self.conf.is_true("tos_split"):
+            lines.append(f"http_tos_split[{p}]: true")
+        if self.conf.is_true("tcp_flags_names"):
+            lines.append(f"http_tcp_flags_names[{p}]: true")
+        if c["ephemeral_ports"]:
+            lines.append(f"http_ephemeral_ports[{p}]: {c['ephemeral_ports']}")
         if c["geoip_asn_file"]:
             lines.append(f"http_geoip_asn_file[{p}]: {c['geoip_asn_file']}")
         if c["geoipv2_file"] and "coords" in self.conf.items("geoip_fields") and c["h3_resolution"]:

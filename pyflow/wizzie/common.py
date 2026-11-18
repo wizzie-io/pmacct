@@ -26,7 +26,7 @@ class Configuration:
                       "local_ip", "ipinfo_token", "static_fields"}
     # Keys an empty value disables instead of taking the default
     _EMPTY_DISABLES = {"history_roundoff", "timestamp_field", "event_source", "event_type", "override_prefix", "geoip_fields",
-                       "h3_resolution", "local_networks"}
+                       "h3_resolution", "local_networks", "ephemeral_ports"}
     # Keys whose value is never written to the log
     _SECRET_KEYS = {"api_key", "ipinfo_token"}
 
@@ -72,6 +72,9 @@ class Configuration:
             "classifier_proto_guess": "True",
             "class_split": "True",
             "class_details": "True",
+            "tos_split": "True",  # dscp (by name) and ecn out of tos
+            "tcp_flags_names": "True",  # tcp_flags by name, ie. "FIN,ACK", instead of the decimal byte
+            "ephemeral_ports": "32768",  # ports from this one up published as "ephemeral", all ports as text; empty disables
             "http_timeout": "10",
             "http_retries": "3",
             "http_multi_values": "131072",
@@ -163,6 +166,9 @@ class Configuration:
         self.config["local_coords"] = self.config["local_coords"] and self.config["local_coords"].replace(" ", "")
         if self.config["h3_resolution"] and not (self.config["h3_resolution"].isdigit() and int(self.config["h3_resolution"]) <= 15):
             raise ConfigError(f"H3_RESOLUTION \"{self.config['h3_resolution']}\" is not valid, expected 0 to 15")
+        if self.config["ephemeral_ports"] and not (self.config["ephemeral_ports"].isdigit() and
+                                                   1 <= int(self.config["ephemeral_ports"]) <= 65535):
+            raise ConfigError(f"EPHEMERAL_PORTS \"{self.config['ephemeral_ports']}\" is not valid, expected a port, 1 to 65535")
         if self.config["local_ip"]:
             try:
                 ipaddress.ip_address(self.config["local_ip"])

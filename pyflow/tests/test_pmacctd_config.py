@@ -40,6 +40,20 @@ class PmacctdConfigTest(unittest.TestCase):
         self.assertNotIn("http_static_fields_file", "\n".join(lines))
         self.assertNotIn("http_local_networks", "\n".join(lines), "no GeoIP databases, nothing known about the site")
 
+    def test_decoded_fields(self):
+        '''tos as dscp and ecn, tcp_flags by name and ephemeral ports by default; each one can be turned off'''
+        lines = self.lines()
+        self.assertIn("http_tos_split[wdp]: true", lines)
+        self.assertIn("http_tcp_flags_names[wdp]: true", lines)
+        self.assertIn("http_ephemeral_ports[wdp]: 32768", lines)
+        conf = self.render(TOS_SPLIT="False", TCP_FLAGS_NAMES="False", EPHEMERAL_PORTS="")["pmacctd.conf"]
+        for key in ("http_tos_split", "http_tcp_flags_names", "http_ephemeral_ports"):
+            self.assertNotIn(key, conf)
+        self.assertIn("http_ephemeral_ports[wdp]: 49152", self.lines(EPHEMERAL_PORTS="49152"))
+        for value in ("0", "65536", "high"):
+            with self.assertRaises(ConfigError):
+                Configuration(dict(BASE, EPHEMERAL_PORTS=value))
+
     def test_default_local_networks(self):
         pretag = self.render()["pretag.map"].splitlines()
         self.assertEqual(pretag[-1], "set_label=direction%in     filter='dst net 10.0.0.0/8 or dst net 172.16.0.0/12 or "
