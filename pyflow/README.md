@@ -101,7 +101,7 @@ $ cd pmacct
 $ git checkout 1.8.0-wizzie
 $ git fetch --tags
 $ V=$(git describe --tags --match "wizzie-v*")
-$ docker buildx build -f pyflow/Dockerfile --platform=linux/amd64 --build-arg VERSION=$V -t europe-west1-docker.pkg.dev/wizzie-registry/wdp-public/pmacctd:$V .
+$ docker buildx build -f pyflow/Dockerfile --platform=linux/amd64 --build-arg VERSION=$V -t europe-west1-docker.pkg.dev/wizzie-registry/wdp-public/pyflow:$V .
 ```
 
 Para publicar una versión nueva, se etiqueta el commit, se construye y se sube la imagen:
@@ -111,7 +111,7 @@ $ git tag -a wizzie-v1.8.0-1 -m "pmacctd wizzie v1.8.0-1"
 $ git push origin wizzie-v1.8.0-1
 $ gcloud auth configure-docker europe-west1-docker.pkg.dev   # una vez por máquina
 $ V=$(git describe --tags --match "wizzie-v*")
-$ docker buildx build -f pyflow/Dockerfile --platform=linux/amd64 --build-arg VERSION=$V -t europe-west1-docker.pkg.dev/wizzie-registry/wdp-public/pmacctd:$V --push .
+$ docker buildx build -f pyflow/Dockerfile --platform=linux/amd64 --build-arg VERSION=$V -t europe-west1-docker.pkg.dev/wizzie-registry/wdp-public/pyflow:$V --push .
 ```
 
 - Con `--platform=linux/amd64,linux/arm64` se sube una imagen multiarquitectura. En una máquina
@@ -135,8 +135,8 @@ El contenedor necesita la red del host y permisos de captura:
 
 ```yaml
 services:
-  pmacctd:
-    image: europe-west1-docker.pkg.dev/wizzie-registry/wdp-public/pmacctd:wizzie-v1.8.0-1
+  pyflow:
+    image: europe-west1-docker.pkg.dev/wizzie-registry/wdp-public/pyflow:latest
     network_mode: host
     cap_add:
       - NET_ADMIN
@@ -180,7 +180,7 @@ services:
     volumes:
       - geoip:/usr/share/GeoIP
 
-  pmacctd:
+  pyflow:
     # ... como en Ejecución, más:
     volumes:
       - geoip:/geoip:ro

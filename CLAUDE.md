@@ -84,11 +84,11 @@ Todo lo de Wizzie que no es el plugin ni su prueba vive en `pyflow/`, para acota
 
 ### Versiones
 
-Etiquetas anotadas `wizzie-v<versión de pmacct>-<revisión>` (`wizzie-v1.8.0-4`…) sobre la rama; la imagen toma `git describe --tags --match "wizzie-v*"` como versión. Se publica en `europe-west1-docker.pkg.dev/wizzie-registry/wdp-public/pmacctd` con la etiqueta de la versión y `latest`, para amd64 (en un Mac arm64 la compilación va emulada y tarda varios minutos):
+Etiquetas anotadas `wizzie-v<versión de pmacct>-<revisión>` (`wizzie-v1.8.0-4`…) sobre la rama; la imagen toma `git describe --tags --match "wizzie-v*"` como versión. Se publica en `europe-west1-docker.pkg.dev/wizzie-registry/wdp-public/pyflow` (hasta `wizzie-v1.8.0-15`, `wdp-public/pmacctd`: se renombró para no confundirla con la imagen del proyecto upstream) con la etiqueta de la versión y `latest`, para amd64 (en un Mac arm64 la compilación va emulada y tarda varios minutos):
 
 ```bash
 V=$(git describe --tags --match "wizzie-v*")
-R=europe-west1-docker.pkg.dev/wizzie-registry/wdp-public/pmacctd
+R=europe-west1-docker.pkg.dev/wizzie-registry/wdp-public/pyflow
 docker buildx build -f pyflow/Dockerfile --platform=linux/amd64 --build-arg VERSION=${V} -t ${R}:${V} -t ${R}:latest --push .
 ```
 
