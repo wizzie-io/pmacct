@@ -37,6 +37,32 @@ class PmacctdLogTest(unittest.TestCase):
         self.assertEqual(snapshot["last_purge"], {"time": 1060, "sent": 931, "total": 937})
         self.assertIsNone(snapshot["last_error"])
 
+    def purge(self, sent, at):
+        self.clock.now = at
+        self.log.feed(f"INFO ( wdp/http ): *** Purging cache - END (PID: 1, QN: {sent}/{sent}, ET: 0) ***")
+
+    def test_no_rate_until_the_second_purge(self):
+        self.purge(600, 1000)
+
+        self.assertIsNone(self.log.snapshot()["messages_per_second"])
+
+        self.purge(1200, 1060)
+        self.assertEqual(self.log.snapshot()["messages_per_second"], 20)
+
+    def test_the_rate_weighs_the_last_purges_most(self):
+        self.purge(1200, 1000)
+        self.purge(1200, 1060)  # 20/s
+        self.purge(2400, 1120)  # 40/s: one minute of a 5 minute half-life moves it ~13 % of the way
+
+        self.assertAlmostEqual(self.log.snapshot()["messages_per_second"], 20 + 20 * (1 - 2 ** (-60 / 300)), places=6)
+
+    def test_the_rate_is_weighted_by_time(self):
+        self.purge(1200, 1000)
+        self.purge(1200, 1060)  # 20/s
+        self.purge(12000, 1360)  # 40/s after five minutes: half the way
+
+        self.assertAlmostEqual(self.log.snapshot()["messages_per_second"], 30)
+
     def test_dropped_batches_and_errors(self):
         self.log.feed("WARN ( wdp/http ): HTTP POST http://192.168.102.9:8880/v1/data/flows_index returned 401 (attempt 1/3)")
         self.log.feed("ERROR ( wdp/http ): HTTP POST http://192.168.102.9:8880/v1/data/flows_index failed, "
@@ -119,7 +145,7 @@ class InsightTest(unittest.TestCase):
         self.assertEqual(values, {
             "version": "unknown", "pmacctd_running": True, "pmacctd_uptime_seconds": 3590,
             "interfaces": [{"name": "eth0", "received_packets": 1000, "dropped_packets": 3}],
-            "purges": 1, "messages_sent": 931, "messages_dropped": 0,
+            "purges": 1, "messages_sent": 931, "messages_dropped": 0, "messages_per_second": 0.0,
             "last_purge": {"time": 1795091160, "sent": 931, "total": 937},
             "geoip": {"city": False, "asn": False, "updated": 0},
         })

@@ -318,6 +318,7 @@ por el estado, y un fallo en ella nunca afecta a la captura.
   - tiempo en marcha de pyflow y de pmacctd;
   - contadores de libpcap de cada interfaz (recibidos y descartados por el kernel, que pmacctd escribe con `SIGUSR1`);
   - la última entrega a la ingesta y los mensajes entregados y descartados;
+  - los mensajes entregados por segundo: media móvil exponencial de cada entrega, ponderada por el tiempo con una vida media de 5 minutos (lo de hace 5 minutos pesa la mitad que la última);
   - el último `ERROR` de pmacctd;
   - si están las bases de GeoIP.
 - Para tener esos datos, pyflow lee la salida de pmacctd línea a línea y la sigue escribiendo tal cual

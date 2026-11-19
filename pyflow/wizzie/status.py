@@ -7,6 +7,8 @@ every line to its own stdout, the container log stays the same) and keeps:
   at the end of each purge, "HTTP POST <url> failed, dropping n msgs (b bytes)" when a batch is
   given up after the retries;
 * the last ERROR line;
+* the messages delivered per second: an exponential moving average of each purge, weighted by time
+  (RATE_HALF_LIFE), so that the last purges weigh most;
 * the libpcap counters of each interface, which pmacctd writes on SIGUSR1:
   "stats [<interface>,<id>] time=<t> received_packets=<n> dropped_packets=<n>".
 '''
@@ -17,6 +19,9 @@ PURGE_END = re.compile(r"Purging cache - END \(PID: \d+, QN: (\d+)/(\d+)")
 DROPPED = re.compile(r"HTTP POST \S+ failed, dropping (\d+) msgs")
 INTERFACE_STATS = re.compile(r"stats \[([^,\]]+),\d+\] time=\d+ received_packets=(\d+) dropped_packets=(\d+)")
 ERROR = re.compile(r"^ERROR \( [^)]* \): (.*)$")
+# Half-life of the moving average of the messages per second: what was delivered this many seconds
+# ago weighs half as much as the last purge
+RATE_HALF_LIFE = 300
 
 
 class PmacctdLog:
@@ -32,6 +37,8 @@ class PmacctdLog:
         self.last_purge = None  # {"time", "sent", "total"}
         self.last_error = None  # {"time", "message"}
         self.interfaces = {}  # name -> {"received_packets", "dropped_packets", "time"}
+        self.messages_per_second = None  # moving average; None until the second purge
+        self.previous_purge = None  # time of the last purge, to measure the interval
 
     def feed(self, line: str):
         line = line.rstrip("\n")
@@ -39,9 +46,11 @@ class PmacctdLog:
             match = PURGE_END.search(line)
             if match:
                 sent, total = int(match.group(1)), int(match.group(2))
+                now = self.clock()
                 self.purges += 1
                 self.messages_sent += sent
-                self.last_purge = {"time": int(self.clock()), "sent": sent, "total": total}
+                self.last_purge = {"time": int(now), "sent": sent, "total": total}
+                self.__update_rate(sent, now)
                 return
             match = INTERFACE_STATS.search(line)
             if match:
@@ -57,6 +66,21 @@ class PmacctdLog:
             match = ERROR.match(line)
             if match:
                 self.last_error = {"time": int(self.clock()), "message": match.group(1).strip()}
+
+    def __update_rate(self, sent: int, now: float):
+        '''Rate of this purge (its messages over the time since the previous one) into the moving
+        average, weighted by the time elapsed: alpha = 1 - 2^(-dt / RATE_HALF_LIFE). The first purge
+        has no interval, so it only starts the clock'''
+        previous, self.previous_purge = self.previous_purge, now
+        if previous is None or now <= previous:
+            return
+        elapsed = now - previous
+        rate = sent / elapsed
+        if self.messages_per_second is None:
+            self.messages_per_second = rate
+        else:
+            alpha = 1 - 2 ** (-elapsed / RATE_HALF_LIFE)
+            self.messages_per_second += alpha * (rate - self.messages_per_second)
 
     def wait_interfaces(self, names, since: float, timeout: float) -> dict:
         '''The counters of `names` written after `since` (a SIGUSR1 sent then), waiting up to
@@ -79,4 +103,5 @@ class PmacctdLog:
                 "messages_dropped": self.messages_dropped,
                 "last_purge": dict(self.last_purge) if self.last_purge else None,
                 "last_error": dict(self.last_error) if self.last_error else None,
+                "messages_per_second": self.messages_per_second,
             }

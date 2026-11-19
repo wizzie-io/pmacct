@@ -84,6 +84,7 @@ def status_values(conf, pmacctd, started_at: float, stats_timeout: float = STATS
         "purges": log["purges"],
         "messages_sent": log["messages_sent"],
         "messages_dropped": log["messages_dropped"],
+        "messages_per_second": round(log["messages_per_second"] or 0.0, 2),
         "geoip": geoip_values(conf),
     }
     if log["last_purge"]:

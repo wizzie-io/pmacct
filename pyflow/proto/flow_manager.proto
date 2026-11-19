@@ -78,6 +78,9 @@ message StatusResponse {
   string last_error     = 11;  // último ERROR de pmacctd; vacío si ninguno
   int64  last_error_time = 12;  // segundos Unix
   GeoipStatus geoip     = 13;
+  // Mensajes entregados por segundo: media móvil exponencial de cada entrega, con vida media de 5
+  // minutos (lo de hace 5 minutos pesa la mitad que lo último). 0 hasta la segunda entrega
+  double messages_per_second = 14;
 }
 
 message InterfaceStats {
