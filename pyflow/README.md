@@ -8,7 +8,7 @@ ingesta de Wizzie (Kong + http2k), como el resto de conectores.
 Es la rama `1.8.0-wizzie` del fork `wizzie-io/pmacct`. Lo que añade sobre el upstream:
 
 - El plugin `http` (`src/http_plugin.c`), que publica los agregados como objetos JSON
-  concatenados en `POST <HTTP_ENDPOINT>/v1/data/<EVENTS_TOPIC>` con la cabecera `apikey`,
+  concatenados en `POST <HTTP_ENDPOINT>/v1/data/<EVENT_TOPIC>` con la cabecera `apikey`,
   compatible con [n2kafka](https://github.com/wizzie-io/n2kafka) (decoder http2k). Las claves
   `http_*` están documentadas en `CONFIG-KEYS`.
 - Este directorio, `pyflow/`: la imagen (`Dockerfile`) y su proceso principal, **pyflow**
@@ -85,8 +85,8 @@ Cada `REFRESH_TIME` segundos se publica un mensaje por cada combinación de los 
 - La conversación en cada sentido es un mensaje distinto, como en NetFlow/IPFIX.
 
 En Kafka, http2k antepone el consumer de Kong de la `API_KEY` al topic: lo publicado en
-`EVENTS_TOPIC` acaba en `<consumer_id>_<EVENTS_TOPIC>`. Para que el tráfico llegue a la
-analítica de Insight, `EVENTS_TOPIC` tiene que ser `flows_index`, el topic que lee el supervisor
+`EVENT_TOPIC` acaba en `<consumer_id>_<EVENT_TOPIC>`. Para que el tráfico llegue a la
+analítica de Insight, `EVENT_TOPIC` tiene que ser `flows_index`, el topic que lee el supervisor
 del datasource `flows` de Druid (el docker-compose que genera Insight para el flow_manager ya lo pone).
 
 ### Construyendo la imagen docker
@@ -146,7 +146,7 @@ services:
       PCAP_INTERFACE: enx00e04c5a5480
       HTTP_ENDPOINT: http://192.168.102.9:8880
       API_KEY: <api key del cliente>
-      EVENTS_TOPIC: flows_index
+      EVENT_TOPIC: flows_index
       LOCAL_NETWORKS: 192.168.102.0/24
 ```
 
@@ -240,10 +240,10 @@ se definen; si se definen vacías, se desactiva lo que hacen.
 
 | Variable | Por defecto | Descripción |
 |---|---|---|
-| `HTTP_ENDPOINT` | — | **Obligatoria.** URL base del endpoint de ingesta (Kong), p. ej. `http://kong:8080`. Se publica en `<HTTP_ENDPOINT>/v1/data/<EVENTS_TOPIC>` |
+| `HTTP_ENDPOINT` | — | **Obligatoria.** URL base del endpoint de ingesta (Kong), p. ej. `http://kong:8080`. Se publica en `<HTTP_ENDPOINT>/v1/data/<EVENT_TOPIC>` |
 | `API_KEY` | — | **Obligatoria.** API key del cliente, enviada en la cabecera `apikey` |
 | `PCAP_INTERFACE` | — | **Obligatoria.** Interfaz de captura, o varias separadas por comas. Con varias, cada mensaje lleva el índice de su interfaz si se añade `in_iface` a `AGGREGATE` |
-| `EVENTS_TOPIC` | `pmacct` | Topic de publicación. `flows_index` para que llegue a la analítica de Insight |
+| `EVENT_TOPIC` | `pmacct` | Topic de publicación. `flows_index` para que llegue a la analítica de Insight. Se lee también el nombre antiguo, `EVENTS_TOPIC`, con un aviso en el log, si `EVENT_TOPIC` no está definida |
 | `PCAP_FILTER` | `""` | Filtro de captura, en sintaxis de tcpdump |
 | `PCAP_EXCLUDE_ENDPOINT` | `True` | Excluye de la captura el tráfico hacia `HTTP_ENDPOINT` (host y puerto), para no contabilizar los propios envíos. Un nombre se resuelve a sus IPs al arrancar; si no se puede resolver, se avisa en el log y no se excluye (el resto de `PCAP_FILTER` se mantiene) |
 | `PROMISC` | `True` | Modo promiscuo en la interfaz |

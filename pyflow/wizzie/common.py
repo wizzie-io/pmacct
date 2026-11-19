@@ -29,6 +29,8 @@ class Configuration:
                        "h3_resolution", "local_networks", "ephemeral_ports"}
     # Keys whose value is never written to the log
     _SECRET_KEYS = {"api_key", "ipinfo_token"}
+    # Old names still read, with a warning, when the new one is unset: composes already deployed use them
+    _DEPRECATED_VARS = {"EVENTS_TOPIC": "event_topic"}  # EVENT_TOPIC, like EVENT_SOURCE and EVENT_TYPE
 
     def __init__(self, environ=None):
         environ = os.environ if environ is None else environ
@@ -44,7 +46,7 @@ class Configuration:
             "config_dir": "/tmp/pmacct",  # where the pmacctd configuration files are written
             "http_endpoint": None,
             "api_key": None,
-            "events_topic": "pmacct",
+            "event_topic": "pmacct",
             "pcap_interface": None,  # one or several, comma separated
             "pcap_savefile": None,  # tests: packets out of a pcap file instead of an interface
             "pcap_filter": None,
@@ -102,8 +104,11 @@ class Configuration:
         # config keys mapping from System ENV vars: the same names, upper case
         self.env_map = {key: key.upper() for key in self.config}
 
+        self.deprecations = []
         self.__set(environ)
         self.__configure_logger()
+        for message in self.deprecations:
+            self.logger.warning(message)
         self.__check_configuration()
 
     def is_true(self, key) -> bool:
@@ -123,6 +128,15 @@ class Configuration:
                 continue
             if value != "" or key in self._EMPTY_DISABLES:
                 self.config[key] = value
+        for old, key in self._DEPRECATED_VARS.items():
+            value = environ.get(old)
+            if not value:
+                continue
+            if environ.get(self.env_map[key]):
+                self.deprecations.append(f"{old} is deprecated and ignored: {self.env_map[key]} is set")
+            else:
+                self.config[key] = value
+                self.deprecations.append(f"{old} is deprecated, use {self.env_map[key]}")
 
     def __configure_logger(self):
         if not self.logger.handlers:

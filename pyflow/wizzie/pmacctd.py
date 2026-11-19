@@ -122,7 +122,7 @@ class PmacctdConfig:
             f"plugins: http[{p}]",
             f"aggregate[{p}]: {aggregate}",
             f"http_endpoint[{p}]: {c['http_endpoint']}",
-            f"http_topic[{p}]: {c['events_topic']}",
+            f"http_topic[{p}]: {c['event_topic']}",
             f"http_apikey[{p}]: {c['api_key']}",
             f"http_timeout[{p}]: {c['http_timeout']}",
             f"http_retries[{p}]: {c['http_retries']}",

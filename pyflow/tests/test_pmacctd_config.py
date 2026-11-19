@@ -110,7 +110,15 @@ class PmacctdConfigTest(unittest.TestCase):
         self.assertIn("http_event_source[wdp]: flow", lines)
 
     def test_empty_takes_default(self):
-        self.assertIn("http_topic[wdp]: pmacct", self.lines(EVENTS_TOPIC=""))
+        self.assertIn("http_topic[wdp]: pmacct", self.lines(EVENT_TOPIC=""))
+
+    def test_event_topic(self):
+        self.assertIn("http_topic[wdp]: flows_index", self.lines(EVENT_TOPIC="flows_index"))
+
+    def test_deprecated_events_topic_still_read(self):
+        # composes already deployed use the old name
+        self.assertIn("http_topic[wdp]: flows_index", self.lines(EVENTS_TOPIC="flows_index"))
+        self.assertIn("http_topic[wdp]: flows_index", self.lines(EVENT_TOPIC="flows_index", EVENTS_TOPIC="other"))
 
     def test_local_networks(self):
         files = self.render(LOCAL_NETWORKS="192.168.102.0/24, 10.0.0.0/8")
