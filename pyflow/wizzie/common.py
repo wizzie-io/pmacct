@@ -56,8 +56,8 @@ class Configuration:
             "history": "1m",
             "history_roundoff": "m",
             "timestamp_field": "timestamp",
-            "event_source": "pmacct",
-            "event_type": "pmacct_flow",
+            "event_source": "flow",
+            "event_type": "network",
             "override_prefix": "pmacct_",
             # comma separated: enables 'direction' and the local_*/remote_* names. By default the private ranges, the
             # local networks of most sites; empty disables both

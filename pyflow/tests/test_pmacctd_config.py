@@ -32,7 +32,8 @@ class PmacctdConfigTest(unittest.TestCase):
         self.assertIn("pcap_interface: eth0", lines)
         self.assertIn("pcap_filter: not ((host 192.168.102.9) and tcp port 8880)", lines)
         self.assertIn("http_topic[wdp]: pmacct", lines)
-        self.assertIn("http_event_type[wdp]: pmacct_flow", lines)
+        self.assertIn("http_event_type[wdp]: network", lines)
+        self.assertIn("http_event_source[wdp]: flow", lines)
         self.assertIn("http_class_split[wdp]: true", lines)
         # LOCAL_NETWORKS defaults to the private ranges: direction and local_*/remote_* out of the box
         self.assertIn("http_local_remote[wdp]: true", lines)
@@ -106,7 +107,7 @@ class PmacctdConfigTest(unittest.TestCase):
         lines = "\n".join(self.lines(EVENT_TYPE="", OVERRIDE_PREFIX="", HISTORY_ROUNDOFF=""))
         for key in ("http_event_type", "http_override_prefix", "http_history_roundoff"):
             self.assertNotIn(key, lines)
-        self.assertIn("http_event_source[wdp]: pmacct", lines)
+        self.assertIn("http_event_source[wdp]: flow", lines)
 
     def test_empty_takes_default(self):
         self.assertIn("http_topic[wdp]: pmacct", self.lines(EVENTS_TOPIC=""))

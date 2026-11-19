@@ -27,11 +27,11 @@ Cada `REFRESH_TIME` segundos se publica un mensaje por cada combinación de los 
 
 ```json
 {
-  "event_type": "pmacct_flow", "class": "TLS/Github", "vlan": 0, "etype": "800",
+  "event_type": "network", "class": "TLS/Github", "vlan": 0, "etype": "800",
   "tcp_flags": "PSH,ACK", "ip_proto": "tcp", "tos": 2, "dscp": "BE", "ecn": "ECT(0)",
   "stamp_inserted": "2026-10-22 15:57:00", "stamp_updated": "2026-10-22 15:58:01",
   "packets": 6, "bytes": 3941, "writer_id": "wdp/10",
-  "timestamp": 1792684620, "event_source": "pmacct", "pmacct_event_type": "purge",
+  "timestamp": 1792684620, "event_source": "flow", "pmacct_event_type": "purge",
   "direction": "out", "l7_protocol": "TLS", "application": "Github",
   "application_category": "Collaborative", "ip_owner": "Azure",
   "local_mac": "14:98:77:39:28:b5", "remote_mac": "8c:ed:e1:14:74:4c",
@@ -41,8 +41,9 @@ Cada `REFRESH_TIME` segundos se publica un mensaje por cada combinación de los 
 
 - `timestamp`: inicio del intervalo, en segundos Unix. Es el tiempo del evento; `stamp_updated`
   es la hora a la que se envió.
-- `event_type` / `event_source`: los campos comunes de los conectores de Wizzie. El valor que
-  pone pmacct en `event_type` (`purge`) se conserva en `pmacct_event_type`.
+- `event_type` / `event_source`: los campos comunes de los conectores de Wizzie. La fuente es
+  `flow` (el producto, no el proyecto pmacct) y el tipo `network`, el mismo que netflow. El valor
+  que pone pmacct en `event_type` (`purge`) se conserva en `pmacct_event_type`.
 - `class`: clasificación de nDPI, como `<protocolo maestro>/<protocolo de aplicación>`. El
   maestro es lo que transporta la aplicación (TLS, QUIC, DNS…) y es `Unknown` cuando nDPI solo
   reconoce un nivel: `QUIC/YouTube` es YouTube sobre QUIC, `Unknown/QUIC` es QUIC sin aplicación
@@ -85,7 +86,8 @@ Cada `REFRESH_TIME` segundos se publica un mensaje por cada combinación de los 
 
 En Kafka, http2k antepone el consumer de Kong de la `API_KEY` al topic: lo publicado en
 `EVENTS_TOPIC` acaba en `<consumer_id>_<EVENTS_TOPIC>`. Para que el tráfico llegue a la
-analítica de Insight, `EVENTS_TOPIC` tiene que ser `default_index`.
+analítica de Insight, `EVENTS_TOPIC` tiene que ser `flows_index`, el topic que lee el supervisor
+del datasource `flows` de Druid (el docker-compose que genera Insight para el flow_manager ya lo pone).
 
 ### Construyendo la imagen docker
 
@@ -144,7 +146,7 @@ services:
       PCAP_INTERFACE: enx00e04c5a5480
       HTTP_ENDPOINT: http://192.168.102.9:8880
       API_KEY: <api key del cliente>
-      EVENTS_TOPIC: default_index
+      EVENTS_TOPIC: flows_index
       LOCAL_NETWORKS: 192.168.102.0/24
 ```
 
@@ -241,7 +243,7 @@ se definen; si se definen vacías, se desactiva lo que hacen.
 | `HTTP_ENDPOINT` | — | **Obligatoria.** URL base del endpoint de ingesta (Kong), p. ej. `http://kong:8080`. Se publica en `<HTTP_ENDPOINT>/v1/data/<EVENTS_TOPIC>` |
 | `API_KEY` | — | **Obligatoria.** API key del cliente, enviada en la cabecera `apikey` |
 | `PCAP_INTERFACE` | — | **Obligatoria.** Interfaz de captura, o varias separadas por comas. Con varias, cada mensaje lleva el índice de su interfaz si se añade `in_iface` a `AGGREGATE` |
-| `EVENTS_TOPIC` | `pmacct` | Topic de publicación. `default_index` para que llegue a la analítica de Insight |
+| `EVENTS_TOPIC` | `pmacct` | Topic de publicación. `flows_index` para que llegue a la analítica de Insight |
 | `PCAP_FILTER` | `""` | Filtro de captura, en sintaxis de tcpdump |
 | `PCAP_EXCLUDE_ENDPOINT` | `True` | Excluye de la captura el tráfico hacia `HTTP_ENDPOINT` (host y puerto), para no contabilizar los propios envíos. Un nombre se resuelve a sus IPs al arrancar; si no se puede resolver, se avisa en el log y no se excluye (el resto de `PCAP_FILTER` se mantiene) |
 | `PROMISC` | `True` | Modo promiscuo en la interfaz |
@@ -251,8 +253,8 @@ se definen; si se definen vacías, se desactiva lo que hacen.
 | `HISTORY` | `1m` | Duración de cada intervalo de agregación (`30s`, `1m`, `5m`…). Conviene que coincida con `REFRESH_TIME` |
 | `HISTORY_ROUNDOFF` | `m` | Alineación del inicio de los intervalos (`m`, `h`, `d`, `w`, `M`). *Vacía desactiva* |
 | `TIMESTAMP_FIELD` | `timestamp` | Campo con el inicio del intervalo en segundos Unix. *Vacía desactiva* |
-| `EVENT_SOURCE` | `pmacct` | Valor del campo `event_source`. *Vacía desactiva* |
-| `EVENT_TYPE` | `pmacct_flow` | Valor del campo `event_type`, en lugar de `purge`. *Vacía desactiva* |
+| `EVENT_SOURCE` | `flow` | Valor del campo `event_source`. *Vacía desactiva* |
+| `EVENT_TYPE` | `network` | Valor del campo `event_type`, en lugar de `purge`. *Vacía desactiva* |
 | `OVERRIDE_PREFIX` | `pmacct_` | Prefijo con el que se conserva un campo que se sustituye (`event_type` → `pmacct_event_type`; también `l7_protocol`, `application`, `application_category` e `ip_owner` si ya venían). *Vacía desactiva* |
 | `LOCAL_NETWORKS` | `10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7` | Redes locales separadas por comas (IPv4 o IPv6), p. ej. `192.168.102.0/24,10.0.0.0/8`. Activa `direction` y los nombres `local_*`/`remote_*`. Por defecto, los rangos privados, que son las redes locales de la mayoría de las sedes; una LAN con direcciones públicas o CGNAT (`100.64.0.0/10`) se define aquí. *Vacía desactiva* |
 | `LOCAL_MULTICAST` | `True` | Con `LOCAL_NETWORKS`, cuenta como `local` el tráfico hacia multicast y broadcast desde una red local o desde una dirección sin asignar (`0.0.0.0`, `::`: DHCP, detección de dirección duplicada de IPv6, consultas IGMP) y el IPv6 link-local |
