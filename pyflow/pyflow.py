@@ -1,4 +1,4 @@
-import signal, sys
+import signal, sys, threading, time
 from wizzie.common import Configuration, ConfigError
 from wizzie.pmacctd import PmacctdConfig, Pmacctd
 from wizzie.geoip import GeoipFile
@@ -16,11 +16,15 @@ if __name__ == "__main__":
     for signum in (signal.SIGTERM, signal.SIGINT):
         signal.signal(signum, lambda signum, frame: conf.exit_event.set())
 
+    started_at = time.time()
+    local_geo = {}
     if conf.config["pmacctd_config_file"]:
         conf_file = conf.config["pmacctd_config_file"]
         logger.info(f"using {conf_file} as it is")
     else:
-        conf_file = PmacctdConfig(conf).write()
+        pmacctd_config = PmacctdConfig(conf)
+        conf_file = pmacctd_config.write()
+        local_geo = pmacctd_config.local_geo
 
     # the GeoIP databases are usually written by another container: wait for them, then follow the updates
     geoip = None
@@ -32,6 +36,13 @@ if __name__ == "__main__":
 
     pmacctd = Pmacctd(conf, conf_file)
     pmacctd.start()
+
+    # session with Insight as its flow_manager: its status. It never stops the capture
+    if conf.insight_enabled():
+        from wizzie.insight import insight_watch
+        threading.Thread(target=insight_watch, args=(conf, pmacctd, local_geo, started_at), daemon=True).start()
+    else:
+        logger.info("no session with Insight: GRPC_HOST, GRPC_DEVICE_ID and API_KEY are needed")
 
     # pyflow lives as long as pmacctd: if pmacctd ends on its own (an error, or the end of
     # PCAP_SAVEFILE), pyflow ends with its exit code and the container restart policy applies

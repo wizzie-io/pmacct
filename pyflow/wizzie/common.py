@@ -23,7 +23,8 @@ class Configuration:
     _OPTIONAL_KEYS = {"http_endpoint", "api_key", "pcap_interface", "pcap_savefile", "pmacctd_config_file", "pcap_filter",
                       "local_networks", "cache_entries", "geoipv2_file", "geoip_asn_file", "extra_config",
                       "local_country", "local_asn", "local_as_org", "local_coords", "local_city", "local_region",
-                      "local_ip", "ipinfo_token", "static_fields"}
+                      "local_ip", "ipinfo_token", "static_fields", "grpc_host", "grpc_device_id",
+                      "grpc_instance_id"}
     # Keys an empty value disables instead of taking the default
     _EMPTY_DISABLES = {"history_roundoff", "timestamp_field", "event_source", "event_type", "override_prefix", "geoip_fields",
                        "h3_resolution", "local_networks", "ephemeral_ports"}
@@ -100,11 +101,18 @@ class Configuration:
             "geoipv2_check_seconds": "60",  # how often GEOIPV2_FILE is checked for a new version
             "debug": "False",  # pmacctd debug log
             "extra_config": None,  # pmacctd configuration lines appended at the end
+            # session with Insight as its flow_manager (see insight.py): with GRPC_HOST, GRPC_DEVICE_ID and API_KEY
+            "grpc_host": None,
+            "grpc_port": "443",
+            "grpc_secure": "True",
+            "grpc_device_id": None,  # the flow_manager Device in Insight
+            "grpc_instance_id": None,  # stable id of this instance; the hostname when unset
         }
         # config keys mapping from System ENV vars: the same names, upper case
         self.env_map = {key: key.upper() for key in self.config}
 
         self.deprecations = []
+        self.local_geo_sources = []  # set by localgeo.resolve(), for the session with Insight
         self.__set(environ)
         self.__configure_logger()
         for message in self.deprecations:
@@ -113,6 +121,11 @@ class Configuration:
 
     def is_true(self, key) -> bool:
         return str2bool(self.config[key] or "")
+
+    def insight_enabled(self) -> bool:
+        '''The session with Insight (flow_manager status) needs where, who and the customer key'''
+        c = self.config
+        return bool(c["grpc_host"] and c["grpc_device_id"] and c["api_key"])
 
     def items(self, key) -> list:
         '''A comma separated setting as a list, blanks removed'''
@@ -162,7 +175,7 @@ class Configuration:
             raise ConfigError("ENV var API_KEY must be set")
         if not (self.config["pcap_interface"] or self.config["pcap_savefile"]):
             raise ConfigError("ENV var PCAP_INTERFACE must be set")
-        for key in ("snaplen", "refresh_time", "classifier_num_roots", "classifier_max_flows", "http_timeout", "http_retries",
+        for key in ("grpc_port", "snaplen", "refresh_time", "classifier_num_roots", "classifier_max_flows", "http_timeout", "http_retries",
                     "http_multi_values", "cache_entries", "geoipv2_wait", "geoipv2_check_seconds"):
             if self.config[key] is not None and not self.config[key].isdigit():
                 raise ConfigError(f"{self.env_map[key]} \"{self.config[key]}\" is not valid, expected an integer")

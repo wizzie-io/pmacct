@@ -61,6 +61,8 @@ def resolve(conf, fetch=fetch_ipinfo) -> dict:
             values[key] = found[key]
             sources[key] = "ipinfo.io"
 
+    # where each value came from, for the status of the flow_manager in Insight
+    conf.local_geo_sources = [f"{key} {values[key]} ({sources[key]})" for key in wanted if key in values]
     for key in wanted:
         if key in values:
             logger.info(f"local networks: {key} {values[key]} ({sources[key]})")

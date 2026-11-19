@@ -48,6 +48,19 @@ RUN ./autogen.sh && \
               --disable-bgp-bins --disable-bmp-bins --disable-st-bins && \
   make && make install
 
+# Python stubs of the session with Insight (pyflow/proto/flow_manager.proto, vendored from Insight), with
+# Debian's grpc tools so that they match its python3-protobuf. A stage of its own: changing the proto
+# does not build pmacct again
+FROM debian:trixie-slim AS proto-stage
+RUN apt-get update && \
+  apt-get install -y --no-install-recommends python3-grpc-tools && \
+  rm -rf /var/lib/apt/lists/*
+COPY pyflow/proto/ /proto/
+RUN mkdir -p /out && \
+  python3 -m grpc_tools.protoc -I /proto --python_out=/out --grpc_python_out=/out /proto/flow_manager.proto && \
+  sed -i 's/^import flow_manager_pb2/from . import flow_manager_pb2/' /out/flow_manager_pb2_grpc.py && \
+  touch /out/__init__.py
+
 FROM debian:trixie-slim
 COPY ci/dpkg.cfg.d/excludes /etc/dpkg/dpkg.cfg.d/excludes
 RUN apt-get update && \
@@ -58,6 +71,8 @@ RUN apt-get update && \
     libmaxminddb0 \
     libpcap0.8 \
     python3 \
+    python3-grpcio \
+    python3-protobuf \
     tini && \
   rm -rf /var/lib/apt/lists/*
 COPY --from=build-stage /usr/local/ /usr/local/
@@ -66,6 +81,7 @@ RUN ldconfig
 WORKDIR /app
 COPY pyflow/launch.sh pyflow/pyflow.py /app/
 COPY pyflow/wizzie/ /app/wizzie/
+COPY --from=proto-stage /out/ /app/wizzie/grpc_generated/
 
 # Version of the image: passed with --build-arg and read by pyflow at start. Last, so that
 # changing it does not invalidate the cache of the layers above

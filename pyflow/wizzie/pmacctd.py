@@ -1,9 +1,10 @@
 '''pmacctd for pyflow: the configuration files it needs, out of the settings, and the process itself'''
 
-import ipaddress, json, os, re, signal, socket, subprocess
+import ipaddress, json, os, re, signal, socket, subprocess, sys, threading, time
 from urllib.parse import urlsplit
 from wizzie.geoip import GEOIP_PRIMITIVES
 from wizzie import localgeo
+from wizzie.status import PmacctdLog
 
 PLUGIN = "wdp"  # plugin instance name, shows in the logs and in writer_id
 # maps_row_len for pretag.map: pmacct ignores longer lines (its default, 256 plus a margin, is too short
@@ -208,29 +209,36 @@ class PmacctdConfig:
             if self.conf.is_true("local_multicast"):
                 local = f"({local}) or (ip6 and src net fe80::/10)"
             excludes.append(f"not ({local})")
-        endpoint = self.__exclude_endpoint()
-        if endpoint:
-            excludes.append(endpoint)
+        excludes += self.__exclude_endpoints()
         if not excludes:
             return pcap_filter
         return " and ".join(([f"({pcap_filter})"] if pcap_filter else []) + excludes)
 
-    def __exclude_endpoint(self):
-        '''Our own traffic to the endpoint, out of the capture: "not ((host a or host b) and tcp port p)"'''
+    def __exclude_endpoints(self):
+        '''Our own traffic out of the capture: to HTTP_ENDPOINT and, with the session with Insight, to
+        GRPC_HOST. Each one as "not ((host a or host b) and tcp port p)"'''
         if not self.conf.is_true("pcap_exclude_endpoint"):
-            return ""
-        endpoint = urlsplit(self.conf.config["http_endpoint"])
-        host = endpoint.hostname or ""
+            return []
+        c = self.conf.config
+        endpoint = urlsplit(c["http_endpoint"])
         try:
             port = endpoint.port or (443 if endpoint.scheme == "https" else 80)
         except ValueError:
             port = 443 if endpoint.scheme == "https" else 80
-        # by address: a name pmacctd can't resolve would make it drop the whole filter
-        addrs = self.__resolve(host)
-        if not addrs:
-            self.logger.warning(f"can't resolve '{host}', traffic to HTTP_ENDPOINT is not excluded from the capture")
-            return ""
-        return "not ((" + " or ".join(f"host {addr}" for addr in addrs) + f") and tcp port {port})"
+        targets = [("HTTP_ENDPOINT", endpoint.hostname or "", port)]
+        if self.conf.insight_enabled():
+            targets.append(("GRPC_HOST", c["grpc_host"], int(c["grpc_port"])))
+        excludes = []
+        for name, host, port in targets:
+            # by address: a name pmacctd can't resolve would make it drop the whole filter
+            addrs = self.__resolve(host)
+            if not addrs:
+                self.logger.warning(f"can't resolve '{host}', traffic to {name} is not excluded from the capture")
+                continue
+            exclude = "not ((" + " or ".join(f"host {addr}" for addr in addrs) + f") and tcp port {port})"
+            if exclude not in excludes:
+                excludes.append(exclude)
+        return excludes
 
     @staticmethod
     def __resolve(host):
@@ -247,16 +255,34 @@ class PmacctdConfig:
 
 
 class Pmacctd:
-    '''The pmacctd process: started, signalled and stopped by pyflow, which waits for it'''
+    '''The pmacctd process: started, signalled and stopped by pyflow, which waits for it. Its output
+    goes on to pyflow's stdout line by line, and `log` keeps what the status needs out of it'''
 
     def __init__(self, conf, conf_file):
         self.logger = conf.logger
         self.conf_file = conf_file
         self.process = None
+        self.started_at = None
+        self.log = PmacctdLog()
 
     def start(self):
-        self.process = subprocess.Popen(["pmacctd", "-f", self.conf_file])
+        self.process = subprocess.Popen(["pmacctd", "-f", self.conf_file], stdout=subprocess.PIPE,
+                                        stderr=subprocess.STDOUT, text=True, bufsize=1, errors="replace")
+        self.started_at = time.time()
+        threading.Thread(target=self.__forward_output, daemon=True).start()
         self.logger.info(f"pmacctd started (PID {self.process.pid})")
+
+    def running(self) -> bool:
+        return self.poll() is None and self.process is not None
+
+    def uptime(self) -> int:
+        return int(time.time() - self.started_at) if self.running() else 0
+
+    def interface_stats(self, names, timeout=2.0) -> dict:
+        '''libpcap counters of each interface, asked for with SIGUSR1 and read from the output'''
+        since = time.time()
+        self.print_stats()
+        return self.log.wait_interfaces(names, since, timeout)
 
     def poll(self):
         '''Exit code once pmacctd has ended, None while it runs'''
@@ -283,6 +309,12 @@ class Pmacctd:
             return self.process.wait()
 
     # Private
+
+    def __forward_output(self):
+        for line in self.process.stdout:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            self.log.feed(line)
 
     def __signal(self, signum):
         if self.process and self.process.poll() is None:

@@ -245,7 +245,7 @@ se definen; si se definen vacías, se desactiva lo que hacen.
 | `PCAP_INTERFACE` | — | **Obligatoria.** Interfaz de captura, o varias separadas por comas. Con varias, cada mensaje lleva el índice de su interfaz si se añade `in_iface` a `AGGREGATE` |
 | `EVENT_TOPIC` | `pmacct` | Topic de publicación. `flows_index` para que llegue a la analítica de Insight. Se lee también el nombre antiguo, `EVENTS_TOPIC`, con un aviso en el log, si `EVENT_TOPIC` no está definida |
 | `PCAP_FILTER` | `""` | Filtro de captura, en sintaxis de tcpdump |
-| `PCAP_EXCLUDE_ENDPOINT` | `True` | Excluye de la captura el tráfico hacia `HTTP_ENDPOINT` (host y puerto), para no contabilizar los propios envíos. Un nombre se resuelve a sus IPs al arrancar; si no se puede resolver, se avisa en el log y no se excluye (el resto de `PCAP_FILTER` se mantiene) |
+| `PCAP_EXCLUDE_ENDPOINT` | `True` | Excluye de la captura el tráfico hacia `HTTP_ENDPOINT` (host y puerto) y, con la sesión con Insight, hacia `GRPC_HOST`, para no contabilizar los propios envíos. Un nombre se resuelve a sus IPs al arrancar; si no se puede resolver, se avisa en el log y no se excluye (el resto de `PCAP_FILTER` se mantiene) |
 | `PROMISC` | `True` | Modo promiscuo en la interfaz |
 | `SNAPLEN` | `700` | Bytes capturados de cada paquete. Suficiente para cabeceras y para la clasificación |
 | `AGGREGATE` | `class, etype, src_mac, dst_mac, vlan, src_host, dst_host, src_port, dst_port, proto, tos, tcpflags` | Campos por los que se agrega el tráfico (primitivas de `aggregate` de pmacct; la lista de pmacctd se obtiene con `pmacctd -a`). `tos` incluye el bit ECN, que puede partir una misma conexión en dos mensajes |
@@ -295,6 +295,36 @@ se definen; si se definen vacías, se desactiva lo que hacen.
 | `CONFIG_DIR` | `/tmp/pmacct` | Directorio donde se generan los ficheros de configuración |
 | `PMACCTD_CONFIG_FILE` | `""` | Configuración completa de pmacctd montada en el contenedor. Si se define, se usa tal cual y se ignoran las demás variables |
 | `PCAP_SAVEFILE` | `""` | Pruebas: lee los paquetes de un fichero pcap en lugar de una interfaz y termina al acabarlo |
+| `GRPC_HOST` | `""` | Servidor gRPC de Insight. Con `GRPC_DEVICE_ID` y `API_KEY`, pyflow mantiene una sesión con Insight como su flow_manager (ver *Sesión con Insight*) |
+| `GRPC_PORT` | `443` | Puerto del servidor gRPC |
+| `GRPC_SECURE` | `True` | TLS en la conexión gRPC |
+| `GRPC_DEVICE_ID` | `""` | Id del device flow_manager en Insight |
+| `GRPC_INSTANCE_ID` | hostname | Identificador estable de esta instancia: con él Insight le devuelve la conexión al momento al reconectar |
+
+### Sesión con Insight
+
+Con `GRPC_HOST`, `GRPC_DEVICE_ID` y `API_KEY`, pyflow abre un stream gRPC con Insight
+(`FlowManagerService.OpenSession`, `proto/flow_manager.proto`, copiado de Insight) y lo mantiene,
+reconectando cada 10 s. El docker-compose que genera Insight para el flow_manager ya lleva estas
+variables. Los flujos no van por él, siguen por HTTP; la sesión solo sirve para que Insight pregunte
+por el estado, y un fallo en ella nunca afecta a la captura.
+
+- Al conectar, pyflow envía un `Hello`:
+  - el id del device, la instancia y la versión;
+  - las interfaces de captura y las redes locales;
+  - la ubicación de la sede que resolvió (`LOCAL_*` o ipinfo.io).
+- Solo una instancia tiene la conexión de un flow_manager: otra se rechaza y reintenta.
+- A cada petición de estado responde con:
+  - tiempo en marcha de pyflow y de pmacctd;
+  - contadores de libpcap de cada interfaz (recibidos y descartados por el kernel, que pmacctd escribe con `SIGUSR1`);
+  - la última entrega a la ingesta y los mensajes entregados y descartados;
+  - el último `ERROR` de pmacctd;
+  - si están las bases de GeoIP.
+- Para tener esos datos, pyflow lee la salida de pmacctd línea a línea y la sigue escribiendo tal cual
+  en el log del contenedor.
+- Con `PCAP_EXCLUDE_ENDPOINT`, el tráfico hacia `GRPC_HOST` también queda fuera de la captura.
+- La imagen lleva `python3-grpcio` y `python3-protobuf` de Debian. Los stubs se generan al
+  construirla, a partir de `proto/flow_manager.proto`.
 
 ### Configuración generada
 

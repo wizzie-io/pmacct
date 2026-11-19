@@ -68,3 +68,4 @@ docker/.buildx_config.toml
 
 .claude/
 pyflow/**/__pycache__/
+pyflow/wizzie/grpc_generated/

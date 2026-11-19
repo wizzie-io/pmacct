@@ -1,0 +1,99 @@
+syntax = "proto3";
+
+package flow_manager;
+
+// Contrato entre Insight y pyflow, el flow_manager (wdp-insight#2104, fase 4).
+//
+// Un único stream bidireccional por flow_manager, como el del katok_manager: el servidor gRPC es
+// síncrono y cada stream ocupa un hilo mientras dura. Por él viajan las peticiones de control
+// (Insight -> pyflow) y sus respuestas, correlacionadas por request_id. Los flujos no van por aquí:
+// pyflow los publica por HTTP en la ingesta (Kong + http2k).
+//
+// Solo una instancia de pyflow tiene la conexión de un flow_manager: otra que conecte con el mismo
+// flow_manager_device_id se rechaza con ALREADY_EXISTS y reintenta hasta que la primera desaparece.
+// La misma instancia (mismo instance_id) recupera la conexión al momento al reconectar.
+service FlowManagerService {
+  rpc OpenSession (stream FlowManagerInput) returns (stream FlowManagerOutput);
+}
+
+// ── pyflow -> Insight ──────────────────────────────────────────────────────
+
+message FlowManagerInput {
+  oneof message {
+    Hello          hello  = 1;  // primer mensaje, obligatorio
+    StatusResponse status = 2;  // respuesta a un StatusRequest
+  }
+}
+
+message Hello {
+  string flow_manager_device_id = 1;  // GRPC_DEVICE_ID: el Device flow_manager en Insight
+  string instance_id            = 2;  // estable por instancia (p. ej. el hostname)
+  string version                = 3;  // versión de pyflow (la etiqueta de la imagen)
+  repeated string interfaces    = 4;  // interfaces de captura (PCAP_INTERFACE)
+  repeated string local_networks = 5; // LOCAL_NETWORKS; vacío si la normalización está desactivada
+  Site site                     = 6;  // ubicación de la sede que resolvió pyflow; ausente si ninguna
+}
+
+// Ubicación de la sede para las IPs locales (LOCAL_* o ipinfo.io), la que pyflow pone en los flujos
+message Site {
+  string country  = 1;  // código ISO
+  string asn      = 2;
+  string as_org   = 3;
+  string city     = 4;
+  string region   = 5;
+  string ip       = 6;  // IP pública de la sede
+  Coordinates coordinates = 7;  // ausente si no se conocen
+  repeated string sources = 8;  // de dónde salió cada dato, p. ej. "country ES (ipinfo.io)"
+}
+
+// Un submensaje y no campos optional: el protoc de Debian con el que pyflow genera sus stubs no los admite
+message Coordinates {
+  double latitude  = 1;
+  double longitude = 2;
+}
+
+// ── Insight -> pyflow ──────────────────────────────────────────────────────
+
+message FlowManagerOutput {
+  oneof message {
+    StatusRequest status = 1;
+  }
+}
+
+message StatusRequest {
+  string request_id = 1;
+}
+
+message StatusResponse {
+  string request_id     = 1;
+  int64  uptime_seconds = 2;   // desde que arrancó pyflow
+  string version        = 3;
+  bool   pmacctd_running = 4;
+  int64  pmacctd_uptime_seconds = 5;
+  repeated InterfaceStats interfaces = 6;  // contadores de libpcap (SIGUSR1); vacío si no llegaron a tiempo
+  Purge  last_purge     = 7;   // última entrega a la ingesta; ausente si aún no hubo ninguna
+  int64  purges         = 8;   // desde que arrancó pmacctd
+  int64  messages_sent  = 9;
+  int64  messages_dropped = 10;  // descartados tras agotar los reintentos
+  string last_error     = 11;  // último ERROR de pmacctd; vacío si ninguno
+  int64  last_error_time = 12;  // segundos Unix
+  GeoipStatus geoip     = 13;
+}
+
+message InterfaceStats {
+  string name             = 1;
+  int64  received_packets = 2;
+  int64  dropped_packets  = 3;  // descartados por el kernel: la captura no da abasto
+}
+
+message Purge {
+  int64 time     = 1;  // segundos Unix del final de la purga
+  int64 sent     = 2;  // mensajes entregados
+  int64 total    = 3;  // mensajes de la purga (lo que no sale ahora va en la siguiente)
+}
+
+message GeoipStatus {
+  bool  city      = 1;  // GEOIPV2_FILE disponible
+  bool  asn       = 2;  // GEOIP_ASN_FILE disponible
+  int64 updated   = 3;  // segundos Unix de la versión de GEOIPV2_FILE en uso; 0 si no hay
+}
